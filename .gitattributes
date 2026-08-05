@@ -1,0 +1,25 @@
+# Normalise line endings.
+#
+# Without this, Git on Windows converts LF to CRLF on checkout and back on
+# commit, which produces "LF will be replaced by CRLF" warnings and, worse,
+# can show an entire file as modified when only the line endings differ.
+# Storing everything as LF in the repository keeps the history clean no
+# matter which OS each contributor is on.
+* text=auto eol=lf
+
+# Files that must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+*.zip binary
+
+# Generated — keep it out of diffs, GitHub still stores it.
+package-lock.json linguist-generated=true -diff

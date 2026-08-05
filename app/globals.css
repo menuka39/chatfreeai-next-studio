@@ -1,0 +1,306 @@
+@import "tailwindcss";
+@import "@fontsource-variable/space-grotesk";
+
+/*
+ * DESIGN SYSTEM — "Switchboard"
+ *
+ * The subject: chatfreeai.com puts a dozen frontier AI models (GPT, Claude,
+ * Gemini, Grok, DeepSeek...) behind one free chat box. The identity leans into
+ * that literally — a signal/switchboard idea, many inputs tuning into one live
+ * line — rather than the generic "dark SaaS + single violet accent" look.
+ *
+ * Palette (named):
+ *   Void   #0A0A0E  canvas — cool near-black, not flat
+ *   Panel  #15161B  surface
+ *   Signal #FF7A33  warm amber-orange — the ONE live/action colour
+ *   Wire   #3FCFC0  cool teal — secondary/data accent, used sparingly
+ *   Paper  #F3F1EA  warm off-white ink — pairs with the warm accent
+ *
+ * Deliberately two named accents with different jobs (Signal = action/live,
+ * Wire = data/secondary) rather than one bright colour doing everything, and a
+ * cool-tinted near-black rather than flat #000 — both a conscious step away
+ * from the generic "near-black + single neon accent" AI-default look.
+ *
+ * All existing variable NAMES are kept identical to the previous palette so
+ * every component across the site (40+ files, all built on these tokens)
+ * re-skins automatically — only the values changed.
+ */
+:root {
+  --canvas: #0a0a0e;                       /* Void — page background */
+  --surface: #15161b;                      /* Panel — cards, panels */
+  --surface-raised: #1d1f26;               /* hover / raised */
+  --ink: #f3f1ea;                          /* Paper — primary text */
+  --ink-mute: #a6a39a;                     /* secondary text */
+  --ink-faint: #6b685f;                    /* tertiary text */
+  --line: rgba(255, 255, 255, 0.09);       /* borders */
+  --brand: #ff7a33;                        /* Signal — warm amber-orange */
+  --brand-deep: #ffa366;                   /* hover = brighter on dark */
+  --brand-tint: rgba(255, 122, 51, 0.14);  /* soft brand background */
+  --mint: #3fcfc0;                         /* Wire — teal, secondary accent */
+  --mint-tint: rgba(63, 207, 192, 0.12);
+  --navy: #06060a;                         /* footer / deepest panel */
+  --warn: #f5b84d;
+  --warn-tint: rgba(245, 184, 77, 0.1);
+  --warn-line: rgba(245, 184, 77, 0.3);
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-ink: var(--ink);
+  --color-ink-mute: var(--ink-mute);
+  --color-ink-faint: var(--ink-faint);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-brand-deep: var(--brand-deep);
+  --color-brand-tint: var(--brand-tint);
+  --color-mint: var(--mint);
+  --color-mint-tint: var(--mint-tint);
+  --color-navy: var(--navy);
+  --color-warn: var(--warn);
+  --color-warn-tint: var(--warn-tint);
+  --color-warn-line: var(--warn-line);
+  --font-display: "Space Grotesk Variable", var(--font-geist), sans-serif;
+  --font-sans: var(--font-geist);
+  --font-mono: var(--font-geist-mono);
+}
+
+/*
+ * Signal-orange (--brand) is tuned to be readable AS TEXT on the dark canvas
+ * (7.6:1 contrast) — but that same value is too light for white button text
+ * (2.6:1, fails WCAG AA). Rather than touch the ~25 files whose buttons use
+ * `bg-brand ... text-white`, one unlayered rule forces those buttons to dark
+ * text instead — unlayered CSS always wins over Tailwind's utility layer, so
+ * this is a safe, standard v4 override, not a specificity hack.
+ * Dark (--canvas) text on both --brand and the --brand-deep hover state stays
+ * 7.6:1 / 10:1 — comfortably AA on both.
+ */
+.bg-brand.text-white {
+  color: var(--canvas);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  letter-spacing: -0.011em;
+}
+
+::selection {
+  background: var(--brand);
+  color: #ffffff;
+}
+
+.card-shadow {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 12px 32px -12px rgba(0, 0, 0, 0.55);
+}
+
+/*
+ * Signal-convergence hero diagram (components/SignalConverge.tsx).
+ * One orchestrated page-load moment — threads draw in, nodes fade in behind
+ * them, the convergence point pulses gently once settled — rather than
+ * several independent effects competing for attention.
+ */
+.signal-thread {
+  stroke-dasharray: 420;
+  stroke-dashoffset: 420;
+  animation: signal-draw 1.1s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+  animation-delay: 0.15s;
+}
+.signal-node {
+  opacity: 0;
+  animation: signal-fade-in 0.5s ease-out forwards;
+  animation-delay: 0.9s;
+}
+.signal-pulse-core {
+  animation: signal-core-pulse 2.6s ease-in-out 1.4s infinite;
+}
+.signal-pulse-ring {
+  transform-origin: 600px 330px;
+  animation: signal-ring-pulse 2.6s ease-in-out 1.4s infinite;
+}
+@keyframes signal-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes signal-fade-in {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes signal-core-pulse {
+  0%, 100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes signal-ring-pulse {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  70%, 100% {
+    opacity: 0;
+    transform: scale(6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .signal-thread {
+    stroke-dashoffset: 0;
+    animation: none;
+  }
+  .signal-node {
+    opacity: 1;
+    animation: none;
+  }
+  .signal-pulse-core,
+  .signal-pulse-ring {
+    animation: none;
+  }
+  .signal-pulse-ring {
+    opacity: 0;
+  }
+}
+
+.hero-glow {
+  background:
+    radial-gradient(55% 55% at 70% 8%, rgba(255, 122, 51, 0.12), transparent 70%),
+    radial-gradient(42% 48% at 14% 90%, rgba(63, 207, 192, 0.07), transparent 70%);
+}
+
+/* thin, dark scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+/* ---------------------------------------------------------------------------
+   Markdown replies
+   Written against the site's own tokens rather than importing a highlight.js
+   theme, so code colours stay consistent with the rest of the dark UI instead
+   of dropping a foreign palette into the middle of a chat.
+--------------------------------------------------------------------------- */
+
+.cfai-md > *:first-child { margin-top: 0; }
+.cfai-md > *:last-child { margin-bottom: 0; }
+
+/* TipTap's editable instance reuses cfai-md for typography (same rules as
+   the read-only preview/chat renderer) but needs its own interactive states
+   on top — a read-only <Markdown> render never had a caret or a focus ring. */
+.cfai-md.ProseMirror { caret-color: var(--brand); }
+.cfai-md.ProseMirror:focus { outline: none; }
+.cfai-md.ProseMirror ::selection { background: var(--brand-tint); }
+.cfai-md.ProseMirror hr { margin: 1.25rem 0; border: none; border-top: 1px solid var(--line); }
+.cfai-md img { max-width: 100%; height: auto; border-radius: 10px; margin: 0.75rem 0; display: block; }
+.cfai-md.ProseMirror img.ProseMirror-selectednode { outline: 2px solid var(--brand); outline-offset: 2px; }
+.cfai-md.ProseMirror blockquote { border-left: 2px solid var(--brand); padding-left: 0.9rem; color: var(--ink-mute); }
+.cfai-md.ProseMirror code { background: var(--surface); border-radius: 4px; padding: 0.1rem 0.35rem; font-size: 0.88em; }
+
+.cfai-md p { margin: 0.6rem 0; }
+.cfai-md h1, .cfai-md h2, .cfai-md h3, .cfai-md h4 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.2rem 0 0.5rem;
+}
+.cfai-md h1 { font-size: 1.35rem; }
+.cfai-md h2 { font-size: 1.18rem; }
+.cfai-md h3 { font-size: 1.05rem; }
+.cfai-md h4 { font-size: 0.97rem; }
+
+.cfai-md ul, .cfai-md ol { margin: 0.6rem 0; padding-left: 1.35rem; }
+.cfai-md ul { list-style: disc; }
+.cfai-md ol { list-style: decimal; }
+.cfai-md li { margin: 0.25rem 0; }
+.cfai-md li > ul, .cfai-md li > ol { margin: 0.25rem 0; }
+
+/* task lists from remark-gfm */
+.cfai-md li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.1rem; }
+.cfai-md input[type="checkbox"] { margin-right: 0.45rem; }
+
+.cfai-md strong { font-weight: 650; color: var(--ink); }
+.cfai-md em { font-style: italic; }
+.cfai-md del { opacity: 0.6; }
+
+/* --- syntax highlighting (highlight.js class names) --- */
+.cfai-md .hljs-comment,
+.cfai-md .hljs-quote { color: #6b6b78; font-style: italic; }
+
+.cfai-md .hljs-keyword,
+.cfai-md .hljs-selector-tag,
+.cfai-md .hljs-literal,
+.cfai-md .hljs-doctag { color: #c792ea; }
+
+.cfai-md .hljs-string,
+.cfai-md .hljs-regexp,
+.cfai-md .hljs-addition { color: #9fd88a; }
+
+.cfai-md .hljs-number,
+.cfai-md .hljs-symbol,
+.cfai-md .hljs-bullet { color: #f2a86c; }
+
+.cfai-md .hljs-title,
+.cfai-md .hljs-section,
+.cfai-md .hljs-name,
+.cfai-md .hljs-title.function_ { color: #82aaff; }
+
+.cfai-md .hljs-attr,
+.cfai-md .hljs-attribute,
+.cfai-md .hljs-variable,
+.cfai-md .hljs-template-variable { color: #7fdbca; }
+
+.cfai-md .hljs-type,
+.cfai-md .hljs-class .hljs-title,
+.cfai-md .hljs-built_in { color: #ffcb6b; }
+
+.cfai-md .hljs-meta,
+.cfai-md .hljs-meta .hljs-keyword { color: #89ddff; }
+
+.cfai-md .hljs-deletion { color: #ff6b81; }
+.cfai-md .hljs-emphasis { font-style: italic; }
+.cfai-md .hljs-strong { font-weight: 700; }
+.cfai-md .hljs-link { text-decoration: underline; }
+
+/* Tables in generated output — the screener ends with a ranked comparison,
+   and an unstyled table renders as rows of text with no column alignment,
+   which is exactly the part a recruiter scans first. */
+.cfai-md table {
+  width: 100%;
+  margin: 0.9rem 0;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  display: block;
+  overflow-x: auto;       /* a wide table scrolls rather than widening the page */
+}
+.cfai-md thead { background: var(--surface); }
+.cfai-md th,
+.cfai-md td {
+  border: 1px solid var(--line);
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+  vertical-align: top;
+}
+.cfai-md th { font-weight: 600; color: var(--ink); white-space: nowrap; }
+.cfai-md td { color: var(--ink); }
+
+/* Height of the sticky site header.
+   Anything that pins itself below the header needs this number, and a copy
+   hardcoded elsewhere goes stale the moment the header's padding changes.
+   One definition, referenced by both. */
+:root { --site-header-h: 57px; }
+
+/* While the chat is full screen it owns the whole viewport — the site nav
+   behind it is dead space and a second row of chrome to look past. */
+html.chat-fullscreen > body > header { display: none; }

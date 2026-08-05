@@ -1,0 +1,56 @@
+{
+  "name": "chatfreeai-next",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "verify:models": "node scripts/verify-model-ids.mjs",
+    "audit:margins": "node scripts/audit-margins.mjs",
+    "audit:live": "node scripts/audit-margins.mjs --live",
+    "verify:prices": "node scripts/verify-prices.mjs",
+    "verify:prices:write": "node scripts/verify-prices.mjs --write",
+    "setup:paypal": "node scripts/setup-paypal.mjs",
+    "check:supabase": "node scripts/check-supabase.mjs",
+    "test:resume-pdf": "node --conditions=browser --experimental-strip-types --no-warnings --import ./scripts/register-ts-hook.mjs scripts/test-resume-pdf.mts"
+  },
+  "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "@fontsource-variable/space-grotesk": "^5.3.0",
+    "@next/third-parties": "^16.2.11",
+    "@supabase/ssr": "^0.12.3",
+    "@supabase/supabase-js": "^2.110.7",
+    "@tiptap/extension-image": "^3.29.0",
+    "@tiptap/extension-link": "^3.29.0",
+    "@tiptap/react": "^3.29.0",
+    "@tiptap/starter-kit": "^3.29.0",
+    "fflate": "^0.8.3",
+    "html2canvas-pro": "^2.3.1",
+    "jspdf": "^4.2.1",
+    "next": "^16.2.11",
+    "pdfjs-dist": "^6.1.200",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
+    "tiptap-markdown": "^0.9.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "overrides": {
+    "sharp": "^0.35.3",
+    "postcss": "^8.5.23"
+  }
+}
