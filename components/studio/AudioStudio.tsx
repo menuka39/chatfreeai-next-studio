@@ -14,13 +14,26 @@
  * a cleared cache the same way a project does.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { musicModels, type MusicModelConfig } from "@/lib/music-models";
 import { packages } from "@/lib/packages";
 import { allClips, type StudioClip } from "@/lib/studio-projects";
 import { useStudioProjects, useStudioCredits, fmtCredits } from "./useStudio";
 import "./audio-studio.css";
+import "./audio-studio.overrides.css";
+
+/**
+ * Close-on-outside-click.
+ *
+ * Next's App Router hydrates into `document`, so React's delegated listener
+ * and ours sit on the SAME node, where stopPropagation cannot stop a sibling.
+ * React opened the model dropdown and our listener closed it in the same
+ * click, so it never appeared to open. Test what was clicked instead.
+ */
+const KEEP_OPEN = "[data-studio-open]";
+
+type View = "generate" | "library" | "credits" | "payment";
 
 const GENRES = [
   "Pop", "Lo-fi", "Hip-hop", "EDM", "Rock", "Jazz",
@@ -112,20 +125,33 @@ export default function AudioStudio() {
   const [lyrics, setLyrics] = useState("");
   const [styleTags, setStyleTags] = useState<string[]>([]);
   const [instrumental, setInstrumental] = useState(false);
-  const [format, setFormat] = useState("mp3");
   const [filter, setFilter] = useState<"all" | "liked">("all");
-  const [payOpen, setPayOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ msg: string; type?: "error" | "success" } | null>(null);
 
   /* player */
-  const [queueIdx, setQueueIdx] = useState(-1);
+  /**
+   * The playing track is remembered by id, not by its position in the list.
+   *
+   * The list is filtered (All / Liked) and mutated (like, delete), so an index
+   * pointed at a different track the moment any of that happened: the bar
+   * would relabel itself mid-song, and Next would jump somewhere unrelated.
+   */
+  const [playingId, setPlayingId] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [cur, setCur] = useState(0);
   const [dur, setDur] = useState(0);
   const seekingRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+
+  const [view, setView] = useState<View>("generate");
+  /** false on the server and during hydration — the clock is browser-only. */
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
 
   const { projects, push, save } = useStudioProjects("audio");
   const { credits, refresh: refreshCredits } = useStudioCredits();
@@ -138,10 +164,15 @@ export default function AudioStudio() {
     [library, filter],
   );
   const queue = visible;
-  const nowPlaying = queueIdx > -1 ? queue[queueIdx] : null;
+  const nowPlaying = library.find((c) => c.job_id === playingId) ?? null;
+  // -1 when the playing track is filtered out; next/prev then start from the top
+  const queueIdx = queue.findIndex((c) => c.job_id === playingId);
 
   useEffect(() => {
-    const close = () => setDdOpen(false);
+    const close = (e: MouseEvent) => {
+      if ((e.target as Element | null)?.closest?.(KEEP_OPEN)) return;
+      setDdOpen(false);
+    };
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setDdOpen(false);
     document.addEventListener("click", close);
     document.addEventListener("keydown", esc);
@@ -152,22 +183,23 @@ export default function AudioStudio() {
   }, []);
 
   /* ---------------- player ---------------- */
-  const playIndex = useCallback(
-    (i: number) => {
-      if (i < 0 || i >= queue.length) return;
-      setQueueIdx(i);
-      const a = audioRef.current;
-      if (!a) return;
-      a.src = queue[i].url;
-      void a.play();
-    },
-    [queue],
-  );
+  const playClip = useCallback((clip: StudioClip | undefined) => {
+    if (!clip) return;
+    setPlayingId(clip.job_id);
+    const a = audioRef.current;
+    if (!a) return;
+    a.src = clip.url;
+    void a.play();
+  }, []);
 
-  function playClip(clip: StudioClip) {
-    const i = queue.findIndex((q) => q.job_id === clip.job_id);
-    playIndex(i > -1 ? i : 0);
-  }
+  const step = useCallback(
+    (delta: 1 | -1) => {
+      if (!queue.length) return;
+      const from = queueIdx > -1 ? queueIdx : delta > 0 ? -1 : 0;
+      playClip(queue[(from + delta + queue.length) % queue.length]);
+    },
+    [queue, queueIdx, playClip],
+  );
 
   function toggleLike(clip: StudioClip) {
     save(
@@ -179,6 +211,10 @@ export default function AudioStudio() {
   }
 
   function removeClip(clip: StudioClip) {
+    if (clip.job_id === playingId) {
+      audioRef.current?.pause();
+      setPlayingId(null);
+    }
     save(
       projects
         .map((p) => ({ ...p, clips: p.clips.filter((c) => c.job_id !== clip.job_id) }))
@@ -207,6 +243,7 @@ export default function AudioStudio() {
       return;
     }
     setBusy(true);
+    setView("library");
     setStatus({ msg: "Generating your audio… songs can take a minute or two." });
 
     const styleLine = styleTags.join(", ");
@@ -232,7 +269,7 @@ export default function AudioStudio() {
       if (!res.ok) {
         setBusy(false);
         setStatus({ msg: json.message ?? "Generation failed. Please try again.", type: "error" });
-        if (json.error === "upgrade_required" || json.error === "plan_required") setPayOpen(true);
+        if (json.error === "upgrade_required" || json.error === "plan_required") setView("payment");
         return;
       }
 
@@ -242,7 +279,7 @@ export default function AudioStudio() {
         model: model.id,
         prompt: prompt.trim() || text,
         title: mode === "custom" ? title : undefined,
-        format,
+        format: "mp3",
         liked: 0,
         ts: Date.now(),
       };
@@ -271,7 +308,29 @@ export default function AudioStudio() {
 
   /* ---------------- render ---------------- */
   return (
-    <div className="caud" data-free="0" data-logged={credits?.signedIn ? "1" : "0"}>
+    <div className="caud caud-hasrail" data-free="0" data-logged={credits?.signedIn ? "1" : "0"}>
+      {/* ================= RAIL ================= */}
+      <div className="caud-rail">
+        {(
+          [
+            ["generate", "✦", "Create"],
+            ["library", "▦", "Library"],
+            ["credits", "●", "Credits"],
+            ["payment", "💳", "Payment"],
+          ] as [View, string, string][]
+        ).map(([v, ic, l]) => (
+          <button
+            key={v}
+            type="button"
+            className={`caud-rail-btn${view === v ? " is-active" : ""}`}
+            onClick={() => setView(v)}
+          >
+            <span className="caud-rail-ic">{ic}</span>
+            <span className="caud-rail-l">{l}</span>
+          </button>
+        ))}
+      </div>
+
       {/* ================= LEFT: CONTROL PANEL ================= */}
       <div className="caud-side">
         <div className="caud-side-head">
@@ -286,7 +345,7 @@ export default function AudioStudio() {
 
         <div className="caud-side-scroll">
           <span className="caud-sec">Model</span>
-          <div className="caud-dd" onClick={(e) => e.stopPropagation()}>
+          <div className="caud-dd" data-studio-open>
             <button
               type="button"
               className="caud-dd-btn"
@@ -475,22 +534,19 @@ export default function AudioStudio() {
           </div>
 
           <span className="caud-sec">Format</span>
+          {/*
+            /api/music takes whatever the provider streams back and stores it
+            as mp3 — it never asks for another container. Offering WAV here
+            would have been a switch that silently changed nothing, so the row
+            shows the format that actually comes out.
+          */}
           <div className="caud-formats" role="radiogroup">
-            {model.formats.map((f) => (
-              <label key={f} className="caud-format">
-                <input
-                  type="radio"
-                  name="caud_format"
-                  value={f}
-                  checked={format === f}
-                  onChange={() => setFormat(f)}
-                />
-                <span>
-                  {f.toUpperCase()}
-                  {f === "wav" && <em> · lossless</em>}
-                </span>
-              </label>
-            ))}
+            <label className="caud-format">
+              <input type="radio" name="caud_format" value="mp3" checked readOnly />
+              <span>
+                MP3 <em>· 48kHz stereo</em>
+              </span>
+            </label>
           </div>
 
           {credits && !credits.signedIn && (
@@ -520,18 +576,24 @@ export default function AudioStudio() {
       {/* ================= MAIN ================= */}
       <div className="caud-main">
         <div className="caud-main-head">
-          <h2 className="caud-greet">{greetLine()}</h2>
+          <h2 className="caud-greet">{mounted ? greetLine() : "Let's start creating"}</h2>
           <div className="caud-main-tools">
             <span className="caud-balance" title="Shared balance — also used by the image & video generators">
               <span className="caud-balance-dot" />
               <span>{credits?.signedIn && credits.cap > 0 ? fmtCredits(credits.remaining) : "—"}</span>
             </span>
-            <button type="button" className="caud-topup" onClick={() => setPayOpen((o) => !o)}>
+            <button
+              type="button"
+              className="caud-topup"
+              onClick={() => setView("payment")}
+            >
               ＋ Top up
             </button>
           </div>
         </div>
 
+        {/* ---- CREATE ---- */}
+        <div className="caud-view" hidden={view !== "generate"}>
         <div className="caud-showcase">
           {musicModels.map((m) => (
             <button key={m.id} type="button" className="caud-show" onClick={() => setModelId(m.id)}>
@@ -555,7 +617,15 @@ export default function AudioStudio() {
           ))}
         </div>
 
-        <div className="caud-paywrap" hidden={!payOpen}>
+        <p className="caud-view-hint">
+          Describe what you want on the left, then press Generate. Finished tracks land in
+          the Library.
+        </p>
+        </div>
+
+        {/* ---- PAYMENT ---- */}
+        <div className="caud-view" hidden={view !== "payment"}>
+        <div className="caud-paywrap">
           <div className="caud-showcase">
             {packages.map((p) => (
               <Link key={p.id} href="/pricing" className="caud-show">
@@ -577,6 +647,10 @@ export default function AudioStudio() {
           </div>
         </div>
 
+        </div>
+
+        {/* ---- LIBRARY ---- */}
+        <div className="caud-view" hidden={view !== "library"}>
         <div className="caud-libhead">
           <span className="caud-sec caud-sec-lib">
             Library <em>your creations{capLabel ? ` · ${capLabel}` : ""}</em>
@@ -686,6 +760,20 @@ export default function AudioStudio() {
         <p className="caud-empty" style={{ display: visible.length || busy ? "none" : "" }}>
           Nothing here yet — describe something on the left and press Generate.
         </p>
+        </div>
+
+        {/* ---- CREDITS ---- */}
+        <div className="caud-view" hidden={view !== "credits"}>
+          <div className="caud-paywrap">
+            <span className="caud-sec">Your credits</span>
+            <p className="caud-help">
+              {credits?.signedIn && credits.cap > 0
+                ? `${fmtCredits(credits.remaining)} of ${fmtCredits(credits.cap)} monthly credits left. One balance for music, images, video and chat — it resets with your billing period.`
+                : "Music generation is included in every paid package, billed from the same monthly credits as images, video and chat."}
+            </p>
+            {capLabel && <p className="caud-help">{capLabel}</p>}
+          </div>
+        </div>
       </div>
 
       {/* ================= NOW PLAYING ================= */}
@@ -702,7 +790,7 @@ export default function AudioStudio() {
             type="button"
             className="caud-pbtn"
             aria-label="Previous track"
-            onClick={() => playIndex(queueIdx > 0 ? queueIdx - 1 : queue.length - 1)}
+            onClick={() => step(-1)}
           >
             <svg viewBox="0 0 24 24" width="18" height="18">
               <path fill="currentColor" d="M6 5h2v14H6zM20 5v14L9.5 12z" />
@@ -730,7 +818,7 @@ export default function AudioStudio() {
             type="button"
             className="caud-pbtn"
             aria-label="Next track"
-            onClick={() => playIndex(queueIdx < queue.length - 1 ? queueIdx + 1 : 0)}
+            onClick={() => step(1)}
           >
             <svg viewBox="0 0 24 24" width="18" height="18">
               <path fill="currentColor" d="M16 5h2v14h-2zM4 5v14l10.5-7z" />
@@ -766,7 +854,7 @@ export default function AudioStudio() {
           preload="none"
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
-          onEnded={() => (queue.length > 1 ? playIndex((queueIdx + 1) % queue.length) : setPlaying(false))}
+          onEnded={() => (queue.length > 1 ? step(1) : setPlaying(false))}
           onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
           onTimeUpdate={(e) => {
             if (!seekingRef.current) setCur(e.currentTarget.currentTime);

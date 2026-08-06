@@ -1,0 +1,226 @@
+/*
+ * Audio generator (speech) studio — changes made AFTER the port.
+ *
+ * speech-studio.css stays a byte-for-byte copy of the plugin's cspk.css so it
+ * can be diffed against the original. Everything that intentionally differs
+ * lives here and loads after it.
+ */
+
+/* ---------------------------------------------------------------------------
+   The pinned Generate button
+   .cspk-genwrap is sticky at bottom:10px. Above 901px the control panel is its
+   own scroll container, so the button pins inside that panel — which is what
+   the design intends. Below 901px the panel goes position:static and the
+   sticky element pins to the PAGE viewport instead, so the white pill floated
+   over the Voice picker and sat on top of it for the whole scroll. Nothing
+   below it could be read or tapped.
+
+   On a phone the button belongs in the flow, after the last control.
+   --------------------------------------------------------------------------- */
+@media (max-width: 900px) {
+	.cspk-genwrap {
+		position: static;
+		margin-top: 14px;
+	}
+}
+
+/* Even inside its own scroll container the pill sat directly on top of
+   whatever scrolled under it. A short fade beneath it separates the two. */
+@media (min-width: 901px) {
+	.cspk-genwrap::before {
+		content: "";
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: -12px;
+		height: calc(100% + 24px);
+		background: linear-gradient(180deg, transparent, var(--k-panel) 45%);
+		z-index: -1;
+		pointer-events: none;
+	}
+	.cspk-genwrap {
+		position: sticky;
+		isolation: isolate;
+	}
+	/* room to scroll the last control clear of the pinned button */
+	.cspk-side {
+		padding-bottom: 6px;
+	}
+}
+
+/* ---------------------------------------------------------------------------
+   Voice picker
+   A fixed 118px box holds about three rows. Models with forty-odd voices made
+   that a tiny scrolling window inside an already scrolling panel — two nested
+   scrollbars a few pixels apart. Give it room and cap it by viewport instead.
+   --------------------------------------------------------------------------- */
+.cspk-voices {
+	max-height: min(200px, 30vh);
+	overscroll-behavior: contain;
+}
+
+/* ---------------------------------------------------------------------------
+   Library
+   --------------------------------------------------------------------------- */
+
+/* An empty library was a bare sentence on a wide dark band with nothing to
+   frame it. Give the empty state the same card surface as a real row so the
+   area reads as a container waiting to be filled. */
+.cspk-empty {
+	border: 1px dashed var(--k-line);
+	border-radius: 14px;
+	padding: 26px 18px;
+	text-align: center;
+	color: var(--k-dim);
+	font-size: 13.5px;
+	background: linear-gradient(180deg, #ffffff04, transparent);
+}
+
+/* Two per row once there is space — a single column of short rows leaves most
+   of the width empty on a desktop. */
+@media (min-width: 1100px) {
+	.cspk-lib {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
+	}
+}
+
+/* ---------------------------------------------------------------------------
+   Mobile
+   --------------------------------------------------------------------------- */
+@media (max-width: 560px) {
+	/* iOS zooms any input under 16px on focus, which shifts the whole layout. */
+	.cspk-text,
+	.cspk-vfilter {
+		font-size: 16px;
+	}
+
+	/* The script box was 7 rows — most of a phone screen before you reach the
+	   voice picker or the button. */
+	.cspk-text {
+		min-height: 130px;
+	}
+
+	/* Format pills and their note wrapped into an awkward orphan line. */
+	.cspk-format-note {
+		flex-basis: 100%;
+		margin-top: 2px;
+	}
+
+	/* The now-playing bar is fixed; without room beneath it, it covers the last
+	   library row permanently. */
+	.cspk-main {
+		padding-bottom: 84px;
+	}
+
+	.cspk-greet-t {
+		font-size: clamp(19px, 6vw, 26px);
+	}
+
+	/* Long prompts must not widen the page. */
+	.cspk-clip-text,
+	.cspk-clip-sub {
+		overflow-wrap: anywhere;
+	}
+	.cspk-tiles {
+		grid-template-columns: 1fr;
+	}
+}
+
+/* Nothing inside the studio may widen the page. */
+.cspk {
+	max-width: 100%;
+	overflow-x: clip;
+}
+
+/* ---------------------------------------------------------------------------
+   Icon rail
+   The studio used to be one long scroll: controls, then greeting, then tiles,
+   then the whole library underneath. The library was the part people come back
+   for and it was the part furthest down. A rail turns those into destinations,
+   matching the image and video studios, and keeps the controls in place while
+   you move between them.
+   --------------------------------------------------------------------------- */
+.cspk-rail {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 0;
+	border-right: 1px solid var(--k-line);
+}
+.cspk-hasrail {
+	grid-template-columns: 68px 348px minmax(0, 1fr);
+	gap: 16px;
+}
+.cspk-rail-btn {
+	width: 58px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	border: 0;
+	background: transparent;
+	cursor: pointer;
+	color: var(--k-dim);
+	padding: 9px 2px;
+	border-radius: 12px;
+	transition: 0.13s;
+}
+.cspk-rail-btn:hover {
+	background: #ffffff0a;
+	color: var(--k-txt);
+}
+.cspk-rail-btn.is-active {
+	color: var(--k-txt);
+	background: linear-gradient(135deg, rgba(124, 92, 255, 0.22), transparent 70%);
+}
+.cspk-rail-ic {
+	font-size: 18px;
+	line-height: 1;
+}
+.cspk-rail-l {
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.01em;
+}
+.cspk-view[hidden] {
+	display: none;
+}
+.cspk-view-hint {
+	font-size: 13px;
+	color: var(--k-dim);
+	margin: 4px 2px 0;
+}
+
+/* Below the two-column breakpoint the whole studio stacks, so the rail becomes
+   a scrollable strip above the controls. */
+@media (max-width: 900px) {
+	.cspk-hasrail {
+		grid-template-columns: 1fr;
+	}
+	.cspk-rail {
+		flex-direction: row;
+		justify-content: flex-start;
+		border-right: 0;
+		border-bottom: 1px solid var(--k-line);
+		overflow-x: auto;
+		flex-wrap: nowrap;
+		scrollbar-width: none;
+		margin-bottom: 4px;
+	}
+	.cspk-rail::-webkit-scrollbar {
+		display: none;
+	}
+	.cspk-rail-btn {
+		flex: 0 0 auto;
+	}
+}
+
+@media (min-width: 430px) and (max-width: 900px) {
+	.cspk-rail {
+		justify-content: center;
+		overflow-x: visible;
+	}
+}

@@ -1,0 +1,145 @@
+/*
+ * Image studio — changes made AFTER the port.
+ *
+ * image-studio.css is a byte-for-byte copy of the plugin's aig.css and stays
+ * that way, so it can be diffed against the plugin at any time. Everything
+ * that intentionally differs lives here, loaded after it. Two kinds of rule:
+ * requested changes, and fixes for cases the plugin's CSS never met (it ran
+ * full-width in WordPress, not inside this app's narrower column).
+ */
+
+/* ---------------------------------------------------------------------------
+   Inspiration + guess cards — two per row
+   Three across left ~150px per card in this column, which truncated every
+   title mid-word. Two gives the title room to breathe and the thumbnail a
+   usable size.
+   --------------------------------------------------------------------------- */
+.aig-insp-grid {
+	grid-template-columns: repeat(2, 1fr);
+	gap: 18px;
+}
+
+/* Titles ellipsise on one line; descriptions get two, so every card in a row
+   is the same height instead of stair-stepping. */
+.aig-insp-desc {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	min-height: 2.6em;
+}
+
+/* The thumbnail was a 1:1 square, which at two-up is very tall. 4:3 keeps the
+   card compact enough that two rows fit above the fold. */
+.aig-insp-thumb {
+	aspect-ratio: 4 / 3;
+}
+
+/* ---------------------------------------------------------------------------
+   Mobile
+   --------------------------------------------------------------------------- */
+
+/* The rail turns horizontal below 861px: 6 buttons x 54px + gaps = 354px, wider
+   than a 360px phone once page padding is taken off. Let it scroll rather than
+   overflow the page, and hide the scrollbar since the row is obviously swipeable. */
+@media (max-width: 860px) {
+	.aig-rail {
+		justify-content: flex-start;
+		overflow-x: auto;
+		flex-wrap: nowrap;
+		scrollbar-width: none;
+		-ms-overflow-style: none;
+		scroll-snap-type: x proximity;
+	}
+	.aig-rail::-webkit-scrollbar {
+		display: none;
+	}
+	.aig-rail-btn {
+		flex: 0 0 auto;
+		scroll-snap-align: center;
+	}
+}
+
+/* Wide enough for the whole rail: centre it again. */
+@media (min-width: 430px) and (max-width: 860px) {
+	.aig-rail {
+		justify-content: center;
+		overflow-x: visible;
+	}
+}
+
+@media (max-width: 560px) {
+	/* Five aspect columns in a 280px popover left 44px per swatch — the label
+	   under each shape no longer fit. Four is the most that stays legible. */
+	.aig-aspect-grid {
+		grid-template-columns: repeat(4, 1fr);
+	}
+
+	/* Cards go full width: at 2-up on a phone the thumbnail is postage-stamp
+	   sized and the description is unreadable. */
+	.aig-insp-grid {
+		grid-template-columns: 1fr;
+		gap: 12px;
+	}
+	.aig-insp-thumb {
+		aspect-ratio: 16 / 9;
+	}
+	.aig-insp-desc {
+		-webkit-line-clamp: 3;
+		line-clamp: 3;
+		min-height: 0;
+	}
+
+	/* The floating source menu is 220px wide and anchored to a tap point; on a
+	   narrow screen that can sit half off the edge even after clamping. */
+	.aig-edit-src {
+		width: min(220px, calc(100vw - 20px));
+	}
+
+	/* Long model names and prompts must not push the page sideways. */
+	.aig-meta,
+	.aig-actions {
+		flex-wrap: wrap;
+	}
+	.aig-clipstrip {
+		overflow-x: auto;
+		scrollbar-width: none;
+	}
+	.aig-clipstrip::-webkit-scrollbar {
+		display: none;
+	}
+
+	/* The hero is the first thing on the page; clamp() alone still let it run
+	   to three lines on a small phone. */
+	.aig-hero-h {
+		font-size: clamp(22px, 7vw, 30px);
+	}
+
+	/* iOS zooms any input under 16px on focus, which shifts the whole layout. */
+	.aig-prompt,
+	.aig-editor-prompt {
+		font-size: 16px;
+	}
+}
+
+/* The editor is a full-screen overlay; on a short landscape phone its canvas
+   and toolbar together overflow, and the Apply button ends up unreachable. */
+@media (max-height: 520px) {
+	.aig-editor-stage {
+		min-height: 140px;
+	}
+	.aig-editor-hint {
+		display: none;
+	}
+}
+
+/* Nothing inside the studio may widen the page. The wrap is full-bleed by
+   design, so a single overflowing child would produce a horizontal scrollbar
+   across the whole site. */
+.aig-wrap,
+.aig-studio.aig-app,
+.aig-views {
+	max-width: 100%;
+	overflow-x: clip;
+}

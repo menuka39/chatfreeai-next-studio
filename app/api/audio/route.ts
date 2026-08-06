@@ -4,6 +4,7 @@ import { effectiveCost, creditsForUsd } from "@/lib/price-oracle";
 import { packageById } from "@/lib/packages";
 import { effectiveCredits, type LimitId } from "@/lib/plan-limits";
 import { charge, userMonthlyKey } from "@/lib/quota";
+import { uploadPublicAsset } from "@/lib/storage";
 import { getSession, planFor } from "@/lib/session";
 
 export const runtime = "nodejs";
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return deny(500, "not_configured", "OPENROUTER_API_KEY is not set.");
 
-  let body: { modelId?: string; text?: string; voice?: string; format?: string };
+  let body: { modelId?: string; text?: string; voice?: string; format?: string; store?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -112,8 +113,33 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // The endpoint returns raw audio bytes — pass them straight through.
   const mime = format === "mp3" ? "audio/mpeg" : format === "wav" ? "audio/wav" : "audio/ogg";
+
+  /**
+   * `store: true` keeps the track.
+   *
+   * Streaming raw bytes is the cheapest path and stays the default, but a
+   * caller that keeps a library needs a URL that survives a reload — an
+   * object URL made from the stream dies with the page, leaving a list of
+   * entries whose play buttons do nothing. So the studio asks for the stored
+   * form and gets the same treatment music already had.
+   */
+  if (body.store) {
+    const bytes = Buffer.from(await upstream.arrayBuffer());
+    const ext = format === "mp3" ? "mp3" : format === "wav" ? "wav" : "ogg";
+    const stored = await uploadPublicAsset(
+      `speech/${crypto.randomUUID()}.${ext}`,
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+      mime,
+    );
+    if (!stored) {
+      console.error("[audio] storage upload failed — check the public-assets bucket exists");
+      return deny(502, "storage_error", "Could not save the track. Your credits were not charged.");
+    }
+    return Response.json({ url: stored.publicUrl, credits, bytes: bytes.byteLength });
+  }
+
+  // The endpoint returns raw audio bytes — pass them straight through.
   return new Response(upstream.body, {
     headers: {
       "Content-Type": mime,

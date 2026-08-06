@@ -75,6 +75,82 @@ export const tools: Tool[] = [
     tagline: "Ask your own documents",
     description: "Paste a document and ask questions about it — answers come only from your text, never guessed.",
   },
+  /* ---- Prompt Studio ------------------------------------------------
+     Eight tools that write prompts rather than answers. They share the
+     streaming text-tool pipeline, so they bill from the same monthly
+     credits as everything else. ------------------------------------- */
+  {
+    slug: "prompt-generator",
+    name: "AI Prompt Generator",
+    category: "Work",
+    tagline: "Turn a rough idea into a usable prompt",
+    description:
+      "Type an idea in plain language and get a structured prompt with a defined role, task, constraints and output format.",
+  },
+  {
+    slug: "prompt-checker",
+    name: "Prompt Checker",
+    category: "Work",
+    tagline: "Score and rewrite a prompt you already have",
+    description:
+      "A score out of ten, what works, what is holding it back, and a stronger rewrite you can use straight away.",
+  },
+  {
+    slug: "image-prompt-generator",
+    name: "Image Prompt Generator",
+    category: "Work",
+    tagline: "Midjourney, DALL-E, Stable Diffusion, Flux",
+    description:
+      "One detailed image prompt covering subject, setting, composition, lighting, palette and mood — with Midjourney flags when you need them.",
+  },
+  {
+    slug: "video-prompt-generator",
+    name: "Video Prompt Generator",
+    category: "Work",
+    tagline: "Text-to-video prompts for Veo and friends",
+    description:
+      "Scene, subject and action, camera movement and shot type, lighting, colour grade and pacing — sized to the duration you pick.",
+  },
+  {
+    slug: "song-prompt-generator",
+    name: "Song Prompt Generator",
+    category: "Work",
+    tagline: "Style tags and structure for Suno and Udio",
+    description:
+      "A style-tag line with genre, mood, vocal and instrumentation, a song-structure outline, and a one-line lyrical theme.",
+  },
+  {
+    slug: "story-prompt-generator",
+    name: "Story Prompt Generator",
+    category: "Work",
+    tagline: "Openings that leave room to write",
+    description:
+      "An evocative writing prompt that sets up a scene or situation and stops there, so the story is still yours to write.",
+  },
+  {
+    slug: "character-prompt-generator",
+    name: "Character Prompt Generator",
+    category: "Work",
+    tagline: "Personas for stories, games and chatbots",
+    description:
+      "A character profile with a name, core traits, speech style, a background hook and what drives them.",
+  },
+  {
+    slug: "video-to-prompt",
+    name: "Video to Prompt",
+    category: "Generate",
+    tagline: "Reverse-engineer a prompt from a clip",
+    description:
+      "Upload a video and get the text-to-video prompt that would recreate it — scene, camera movement, lighting, colour grade and pacing.",
+  },
+  {
+    slug: "logo-prompt-generator",
+    name: "Logo Prompt Generator",
+    category: "Work",
+    tagline: "Brand marks for Midjourney and Ideogram",
+    description:
+      "Composition, line quality and negative-space direction, finished with the modifiers that keep a mark clean and scalable.",
+  },
 ];
 
 export interface Post {

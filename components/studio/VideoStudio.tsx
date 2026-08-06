@@ -10,7 +10,7 @@
  * the browser-side ffmpeg join instead of the plugin's server merge.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { videoModels, videoCredits, type VideoModelConfig } from "@/lib/video-models";
 import { promptPresets, promptIdeas } from "@/lib/video-presets";
@@ -22,6 +22,7 @@ import { downloadVideo, videoFilename } from "@/lib/download-video";
 import type { ShowcaseClip } from "@/lib/showcase";
 import { useStudioProjects, useStudioCredits, fmtCredits, greeting } from "./useStudio";
 import "./video-studio.css";
+import "./video-studio.overrides.css";
 
 type View = "generate" | "project" | "browser" | "guess" | "credits" | "payment";
 
@@ -45,6 +46,17 @@ const SUGGEST = [
   "ocean waves, golden hour, slow motion",
 ];
 
+/**
+ * Close-on-outside-click.
+ *
+ * Next's App Router hydrates into `document`, so React's delegated listener
+ * and ours end up on the SAME node — and stopPropagation cannot stop a
+ * sibling listener there. React ran first, then ours closed the popover in the
+ * same click, which is why the spec bar never appeared to open. Test what the
+ * click landed on instead of relying on propagation.
+ */
+const KEEP_OPEN = "[data-studio-open]";
+
 const MODEL_COLORS = ["#7c5cff", "#2bd4d9", "#ff8a3d", "#45d483", "#ff6b9d", "#ffb547"];
 
 function modelColor(slug: string) {
@@ -63,8 +75,19 @@ function modelBadges(m: VideoModelConfig) {
   return out.slice(0, 3);
 }
 
+/** One-line titles ellipsise anyway, so cut on a word, not a character. */
+function ideaTitle(prompt: string) {
+  const first = prompt.split(/[,.—]/)[0].trim();
+  let out = "";
+  for (const w of first.split(/\s+/)) {
+    if (out && (out + " " + w).length > 26) break;
+    out = out ? `${out} ${w}` : w;
+  }
+  return out.replace(/^./, (c) => c.toUpperCase());
+}
+
 const IDEAS: { title: string; prompt: string }[] = [
-  ...promptIdeas.map((p) => ({ title: p.split(",")[0].slice(0, 28), prompt: p })),
+  ...promptIdeas.map((p) => ({ title: ideaTitle(p), prompt: p })),
   ...promptPresets.flatMap((g) =>
     g.options.slice(0, 4).map((o) => ({ title: `${g.label} · ${o.label}`, prompt: o.append })),
   ),
@@ -112,7 +135,18 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
    */
   const [generateAudio, setGenerateAudio] = useState(false);
   const [extendMode, setExtendMode] = useState(false);
-  const [pendingFrame, setPendingFrame] = useState<string | null>(null);
+  /**
+   * What a pending continuation carries over from the clip it extends: the
+   * stored seed frame, the parent's prompt (so style and subject survive the
+   * cut) and the parent's seed. Without these the model re-invents the scene
+   * every link and the chain drifts within three clips.
+   */
+  const [pendingExtend, setPendingExtend] = useState<{
+    frameUrl: string;
+    parentPrompt: string;
+    parentJobId: string;
+    seed: number;
+  } | null>(null);
   const [joining, setJoining] = useState<string | null>(null);
 
   const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -125,7 +159,15 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
   const { projects, currentId, setCurrentId, push, remove } = useStudioProjects("video", migrateVideoHistory);
   const { credits, refresh: refreshCredits } = useStudioCredits();
 
+  /** false on the server and during hydration — see ImageStudio for why. */
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+
   const model = useMemo(() => videoModels.find((m) => m.id === modelId)!, [modelId]);
+  const current = projects.find((p) => p.id === currentId) ?? null;
   const browserClips = useMemo(() => allClips(projects), [projects]);
   const baseCost = videoCredits(model, duration, resolution);
   const cost = generateAudio ? Math.ceil(baseCost * (model.audioSurcharge ?? 2)) : baseCost;
@@ -156,7 +198,11 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
   }, []);
 
   useEffect(() => {
-    const close = () => setSpecsOpen(false);
+    const close = (e: MouseEvent) => {
+      if ((e.target as Element | null)?.closest?.(KEEP_OPEN)) return;
+      setSpecsOpen(false);
+      setModelsOpen(false);
+    };
     document.addEventListener("click", close);
     return () => {
       document.removeEventListener("click", close);
@@ -191,7 +237,10 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
     aspect: string;
     res: string;
     prompt: string;
-    isExtend: boolean;
+    projectId: string | null;
+    seedFrame?: string;
+    seed?: number;
+    parentJobId?: string;
     ts: number;
   }, attempt: number) {
     if (pollRef.current) clearTimeout(pollRef.current);
@@ -207,7 +256,10 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
       aspect: string;
       res: string;
       prompt: string;
-      isExtend: boolean;
+      projectId: string | null;
+      seedFrame?: string;
+      seed?: number;
+      parentJobId?: string;
       ts: number;
     },
     attempt: number,
@@ -238,9 +290,12 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
           aspect: specs.aspect,
           res: specs.res,
           prompt: specs.prompt,
+          seedFrame: specs.seedFrame,
+          seed: specs.seed,
+          parentJobId: specs.parentJobId,
           ts: specs.ts,
         };
-        push(clip, specs.isExtend ? currentId : null);
+        push(clip, specs.projectId);
         void refreshCredits();
         return;
       }
@@ -260,7 +315,29 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
     }
   }
 
-  async function startGenerate(frameUrl: string, endFrameUrl: string, isExtend: boolean) {
+  /**
+   * Restate the parent shot before the new instruction.
+   *
+   * A continuation prompt on its own ("she turns and walks away") gives the
+   * model nothing about who she is or what the shot looks like, so it invents
+   * both — that is where chained clips lose the subject. Leading with the
+   * parent's description keeps the scene, and the new sentence moves it on.
+   */
+  function continuationPrompt(parentPrompt: string, next: string) {
+    const base = parentPrompt.replace(/\s+/g, " ").trim().slice(0, 400);
+    if (!base) return next;
+    return `Continue this exact scene, keeping the same subject, wardrobe, lighting, colour grade and camera style: ${base}. Continuing from the final frame: ${next}`;
+  }
+
+  async function startGenerate(
+    frameUrl: string,
+    endFrameUrl: string,
+    ext: {
+      parentPrompt: string;
+      parentJobId: string;
+      seed: number;
+    } | null,
+  ) {
     if (!prompt.trim()) {
       setStatus({ msg: "Please enter a prompt.", type: "error" });
       return;
@@ -271,7 +348,12 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
       aspect,
       res: resolution,
       prompt,
-      isExtend,
+      seedFrame: ext ? frameUrl : undefined,
+      seed: ext?.seed,
+      parentJobId: ext?.parentJobId || undefined,
+      // resolve the target project NOW: a render takes minutes, and by the
+      // time it lands the user may have opened a different project.
+      projectId: ext ? currentId : null,
       ts: Date.now(),
     };
 
@@ -286,13 +368,14 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           modelId: model.id,
-          prompt,
+          prompt: ext ? continuationPrompt(ext.parentPrompt, prompt) : prompt,
           duration,
           aspectRatio: aspect,
           resolution,
           ...(frameUrl ? { firstFrame: frameUrl } : {}),
           ...(endFrameUrl ? { lastFrame: endFrameUrl } : {}),
           ...(generateAudio ? { generateAudio: true } : {}),
+          ...(ext ? { seed: ext.seed } : {}),
         }),
       });
       const data = await res.json();
@@ -314,8 +397,43 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
     if (!shown || busy) return;
     setStatus({ msg: "Reading the last frame…" });
     try {
-      const frame = await extractLastFrame(shown.url);
-      setPendingFrame(frame);
+      // Ask for the frame at the clip's own size. Downscaling the seed and then
+      // rendering at full resolution again loses detail at every link.
+      //
+      // A resolution label names the SHORT edge (1080p is 1920x1080 landscape
+      // and 1080x1920 portrait), while extractLastFrame caps the LONG one — so
+      // scale by the long/short ratio, not by w/h. Using w/h collapsed to 1 for
+      // anything portrait and quietly cut 9:16 seeds to 608x1080.
+      const edge = Number(shown.res.replace(/\D/g, "")) || 1080;
+      const [w, h] = shown.aspect.split(":").map((n) => parseFloat(n) || 1);
+      const longEdge = Math.round((edge * Math.max(w, h)) / Math.min(w, h));
+      const frame = await extractLastFrame(shown.url, longEdge);
+
+      setStatus({ msg: "Saving the frame…" });
+      const res = await fetch("/api/studio/frame", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl: frame }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setStatus({ msg: json.message ?? "Could not save that frame.", type: "error" });
+        return;
+      }
+
+      // Match the clip being viewed. A merged preview is a blob URL that
+      // belongs to no clip, so fall back to the project's newest clip — its
+      // prompt still describes the scene we are continuing.
+      const clips = current?.clips ?? [];
+      const parent = clips.find((c) => c.url === shown.url) ?? clips[clips.length - 1] ?? null;
+      setPendingExtend({
+        frameUrl: json.url,
+        parentPrompt: parent?.prompt ?? prompt,
+        parentJobId: parent?.job_id ?? "",
+        // one seed for the whole chain — providers that honour it hold the
+        // look together far better than a fresh seed per clip
+        seed: parent?.seed ?? Math.floor(Math.random() * 2_000_000_000),
+      });
       setExtendMode(true);
       setStatus(null);
       promptRef.current?.focus();
@@ -329,7 +447,7 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
 
   function exitExtend() {
     setExtendMode(false);
-    setPendingFrame(null);
+    setPendingExtend(null);
   }
 
   /* ---------------- project actions ---------------- */
@@ -490,6 +608,7 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
                   type="button"
                   className="avg-model-bar"
                   aria-expanded={modelsOpen}
+                  data-studio-open
                   onClick={() => setModelsOpen((o) => !o)}
                 >
                   <span className="avg-model-bar-ic" style={{ ["--avg-mc" as string]: modelColor(model.id) }}>
@@ -502,7 +621,7 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
                   <span className="avg-model-bar-chev">›</span>
                 </button>
 
-                <div className={`avg-models avg-models-collapsed${modelsOpen ? " avg-open" : ""}`}>
+                <div className={`avg-models avg-models-collapsed${modelsOpen ? " avg-open" : ""}`} data-studio-open>
                   {videoModels.map((m) => (
                     <button
                       key={m.id}
@@ -628,7 +747,7 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
                   <div
                     className="avg-pop avg-pop-specs"
                     style={{ display: specsOpen ? "block" : "none" }}
-                    onClick={(e) => e.stopPropagation()}
+                    data-studio-open
                   >
                     <div className="avg-pop-title">Aspect Ratio</div>
                     <div className="avg-pills avg-aspect avg-aspect-grid">
@@ -681,10 +800,8 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
                     type="button"
                     className="avg-ctrlbar"
                     aria-expanded={specsOpen}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSpecsOpen((o) => !o);
-                    }}
+                    data-studio-open
+                    onClick={() => setSpecsOpen((o) => !o)}
                   >
                     <span className={`avg-shape avg-ctrl-shape ${SHAPE[aspect] ?? "avg-s-169"}`} />
                     <span className="avg-ctrlbar-label">
@@ -699,12 +816,12 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
                   className={`avg-btn avg-generate${extendMode ? " avg-cont" : ""}`}
                   disabled={busy || !prompt.trim()}
                   onClick={() => {
-                    if (extendMode && pendingFrame) {
-                      const frame = pendingFrame;
+                    if (extendMode && pendingExtend) {
+                      const ext = pendingExtend;
                       exitExtend();
-                      void startGenerate(frame, "", true);
+                      void startGenerate(ext.frameUrl, "", ext);
                     } else {
-                      void startGenerate(firstFrame, lastFrameImg, false);
+                      void startGenerate(firstFrame, lastFrameImg, null);
                     }
                   }}
                 >
@@ -752,7 +869,8 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
               <div className="avg-panel avg-output avg-main">
                 <div className="avg-hero">
                   <h2 className="avg-hero-h">
-                    <span className="avg-hero-accent">{greeting()}</span>, let&apos;s start creating
+                    <span className="avg-hero-accent">{mounted ? greeting() : "Hello"}</span>, let&apos;s start
+                    creating
                   </h2>
                   <p className="avg-hero-sub">Create stunning AI videos in seconds — no editing skills needed.</p>
                 </div>
@@ -843,9 +961,7 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
                                 </video>
                               </span>
                               <span className="avg-insp-title">{g.modelName ?? "Showcase"}</span>
-                              <span className="avg-insp-desc">
-                                {g.prompt.split(/\s+/).slice(0, 14).join(" ")}…
-                              </span>
+                              <span className="avg-insp-desc">{g.prompt}</span>
                             </button>
                           ))
                         : IDEAS.slice(0, 12).map((g) => (
@@ -860,9 +976,7 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
                             >
                               <span className="avg-insp-thumb" />
                               <span className="avg-insp-title">{g.title}</span>
-                              <span className="avg-insp-desc">
-                                {g.prompt.split(/\s+/).slice(0, 14).join(" ")}…
-                              </span>
+                              <span className="avg-insp-desc">{g.prompt}</span>
                             </button>
                           ))}
                     </div>

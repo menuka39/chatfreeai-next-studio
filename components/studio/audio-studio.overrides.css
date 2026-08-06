@@ -1,0 +1,163 @@
+/*
+ * Music studio — changes made AFTER the port.
+ *
+ * audio-studio.css stays a byte-for-byte copy of the plugin's caud.css so it
+ * can be diffed against the original. Everything that intentionally differs
+ * lives here and loads after it.
+ */
+
+/* ---------------------------------------------------------------------------
+   Icon rail
+   The studio used to be one long scroll: controls, then greeting, then the
+   model showcase, then the whole library underneath. The library is the part
+   people come back for and it was the part furthest down. A rail turns those
+   into destinations, matching the image and video studios, and keeps the
+   controls in place while you move between them.
+   --------------------------------------------------------------------------- */
+.caud-rail {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	padding: 14px 0;
+	border-right: 1px solid var(--caud-line);
+	background: linear-gradient(180deg, rgba(124, 92, 255, 0.05), transparent 40%);
+}
+.caud-hasrail {
+	grid-template-columns: 68px 348px minmax(0, 1fr);
+}
+.caud-rail-btn {
+	width: 58px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	border: 0;
+	background: transparent;
+	cursor: pointer;
+	color: var(--caud-dim);
+	font-family: var(--caud-font);
+	padding: 9px 2px;
+	border-radius: 12px;
+	transition: 0.13s;
+}
+.caud-rail-btn:hover {
+	background: #ffffff0a;
+	color: var(--caud-txt);
+}
+.caud-rail-btn.is-active {
+	color: var(--caud-txt);
+	background: linear-gradient(135deg, rgba(124, 92, 255, 0.22), transparent 70%);
+}
+.caud-rail-ic {
+	font-size: 18px;
+	line-height: 1;
+}
+.caud-rail-l {
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.01em;
+}
+.caud-view[hidden] {
+	display: none;
+}
+.caud-view-hint {
+	font-size: 13px;
+	color: var(--caud-dim);
+	margin: 4px 2px 0;
+}
+
+/* The whole studio stacks below 901px (.caud goes display:block), so the rail
+   becomes a scrollable strip across the top. */
+@media (max-width: 900px) {
+	.caud-rail {
+		flex-direction: row;
+		justify-content: flex-start;
+		border-right: 0;
+		border-bottom: 1px solid var(--caud-line);
+		padding: 6px 8px;
+		overflow-x: auto;
+		flex-wrap: nowrap;
+		scrollbar-width: none;
+	}
+	.caud-rail::-webkit-scrollbar {
+		display: none;
+	}
+	.caud-rail-btn {
+		flex: 0 0 auto;
+	}
+}
+
+@media (min-width: 430px) and (max-width: 900px) {
+	.caud-rail {
+		justify-content: center;
+		overflow-x: visible;
+	}
+}
+
+/* ---------------------------------------------------------------------------
+   Library
+   --------------------------------------------------------------------------- */
+
+/* An empty library was a bare sentence on a wide dark band. Give it the same
+   card surface as a real row so the area reads as a container, not a gap. */
+.caud-empty {
+	border: 1px dashed var(--caud-line);
+	border-radius: 14px;
+	padding: 28px 18px;
+	text-align: center;
+	color: var(--caud-dim);
+	font-size: 13.5px;
+	background: linear-gradient(180deg, #ffffff04, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+   Mobile
+   --------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+	/* iOS zooms any input under 16px on focus, which shifts the whole layout. */
+	.caud-prompt,
+	.caud-input {
+		font-size: 16px;
+	}
+
+	/* The now-playing bar is fixed; without room beneath it, it covers the last
+	   library card permanently. */
+	.caud-main {
+		padding-bottom: 88px;
+	}
+
+	.caud-greet {
+		font-size: clamp(19px, 6vw, 26px);
+	}
+
+	/* Genre and preset chips scroll rather than stacking into a tall wall. */
+	.caud-presets {
+		display: flex;
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		scrollbar-width: none;
+		gap: 8px;
+	}
+	.caud-presets::-webkit-scrollbar {
+		display: none;
+	}
+	.caud-preset {
+		flex: 0 0 auto;
+	}
+
+	/* Long prompts must not widen the page. */
+	.caud-card-title,
+	.caud-card-sub-txt {
+		overflow-wrap: anywhere;
+	}
+	.caud-showcase {
+		grid-template-columns: 1fr;
+	}
+}
+
+/* Nothing inside the studio may widen the page. */
+.caud {
+	max-width: 100%;
+	overflow-x: clip;
+}

@@ -64,7 +64,7 @@ const MARKDOWN_RULES = [
   "not wrap the whole reply in a code fence.",
 ].join("\n");
 
-export const textTools: TextToolConfig[] = [
+const workTools: TextToolConfig[] = [
   /* ------------------------------------------------------------------ */
   {
     slug: "resume-screener",
@@ -307,6 +307,266 @@ export const textTools: TextToolConfig[] = [
     }),
   },
 ];
+
+/**
+ * Prompt Studio — eight tools that write prompts rather than answers.
+ *
+ * Every one of these produces text the user copies into ANOTHER tool, so they
+ * share two rules the rest of this file doesn't: the model must return the
+ * prompt itself with no preamble, labels or quotation marks, and it must not
+ * carry out the request. MARKDOWN_RULES is deliberately absent from most of
+ * them — a prompt pasted into Midjourney or Veo should not arrive wearing
+ * headings and bullet syntax. The checker is the exception, because its output
+ * is a report a person reads here.
+ *
+ * The recipes are the ones from the WordPress Prompt Studio, kept intact:
+ * they are tuned wording, not boilerplate.
+ */
+const PROMPT_ONLY = "\nOutput plain text only: the finished prompt, nothing else. No markdown, no headings, no labels like \"Prompt:\", no quotation marks around the result, and no commentary before or after.";
+
+const PROMPT_MODELS = ["deepseek", "gemini-3-flash", "claude-sonnet-46"];
+
+const IDEA_FIELD = (placeholder: string, label = "Your idea"): TextToolField => ({
+  id: "idea",
+  label,
+  type: "textarea",
+  rows: 4,
+  required: true,
+  maxLength: 3000,
+  placeholder,
+});
+
+const promptTools: TextToolConfig[] = [
+  {
+    slug: "prompt-generator",
+    name: "AI Prompt Generator",
+    tagline: "Turn a rough idea into a usable prompt",
+    intro:
+      "Type your idea in plain language. You get back a structured prompt with a defined role, task, " +
+      "constraints and output format — the parts that make a model give you the same quality of answer " +
+      "every time instead of a different one each run.",
+    modelChoices: PROMPT_MODELS,
+    maxOutputTokens: 1200,
+    outputLabel: "Your prompt",
+    fields: [
+      IDEA_FIELD("e.g. A weekly newsletter that summarizes AI news for small business owners"),
+      { id: "purpose", label: "Purpose", type: "select", options: ["General", "Writing", "Coding", "Business", "Marketing", "Research", "Creative"] },
+      { id: "tone", label: "Tone", type: "select", options: ["Professional", "Casual", "Creative", "Technical"] },
+    ],
+    build: (v) => ({
+      system:
+        "You are an expert prompt engineer. Turn the user's rough idea into a single, polished, ready-to-use AI prompt.\n" +
+        `Context: the finished prompt will be used for a "${v.purpose || "General"}" task, written in a "${v.tone || "Professional"}" tone.\n` +
+        "Rules:\n" +
+        "- Make the prompt specific, structured and unambiguous (add role, context, task, constraints, and desired output format where useful).\n" +
+        "- Do not answer the user's idea yourself, only produce the improved PROMPT." +
+        PROMPT_ONLY,
+      user: trim(v.idea, 3000),
+    }),
+  },
+
+  {
+    slug: "prompt-checker",
+    name: "Prompt Checker",
+    tagline: "Score and rewrite a prompt you already have",
+    intro:
+      "Paste a prompt and get it reviewed the way an experienced prompt engineer would: a score out of ten, " +
+      "what already works, what is holding it back, and a stronger rewrite you can use straight away.",
+    modelChoices: PROMPT_MODELS,
+    maxOutputTokens: 2000,
+    outputLabel: "Review",
+    fields: [
+      {
+        id: "prompt",
+        label: "The prompt to review",
+        type: "textarea",
+        rows: 8,
+        required: true,
+        maxLength: 3000,
+        placeholder: "Paste the full prompt you want reviewed here…",
+      },
+    ],
+    build: (v) => ({
+      // the one tool here whose output is read rather than copied onward, so
+      // it gets the shared Markdown treatment
+      system:
+        "You are a meticulous prompt-quality reviewer.\n" +
+        "Analyse the prompt the user provides and return:\n" +
+        "1. Score: X/10\n" +
+        "2. Strengths: 2-4 short bullet points\n" +
+        "3. Weaknesses: 2-4 short bullet points\n" +
+        "4. Improved Version: a rewritten, stronger version of the prompt\n" +
+        "Keep it concise and actionable. Put the improved version in a fenced code block so it can be copied cleanly." +
+        MARKDOWN_RULES,
+      user: trim(v.prompt, 3000),
+    }),
+  },
+
+  {
+    slug: "image-prompt-generator",
+    name: "Image Prompt Generator",
+    tagline: "Midjourney, DALL-E, Stable Diffusion, Flux",
+    intro:
+      "Describe what you want to see. You get one detailed image prompt covering subject, setting, " +
+      "composition, lighting, palette and mood — with the right parameter flags appended when you pick Midjourney.",
+    modelChoices: PROMPT_MODELS,
+    maxOutputTokens: 1200,
+    outputLabel: "Image prompt",
+    fields: [
+      IDEA_FIELD("e.g. An old fisherman mending nets at dawn on a Sri Lankan beach"),
+      { id: "platform", label: "Platform", type: "select", options: ["General", "Midjourney", "DALL-E 3", "Stable Diffusion", "Flux"] },
+      { id: "style", label: "Style", type: "select", options: ["Photorealistic", "Cinematic", "Anime", "Digital Art", "3D Render", "Fantasy", "Minimalist"] },
+      { id: "ratio", label: "Aspect Ratio", type: "select", options: ["1:1", "16:9", "9:16", "4:3", "3:2"] },
+    ],
+    build: (v) => ({
+      system:
+        "You are an expert AI image-prompt engineer for tools such as Midjourney, DALL-E 3, Stable Diffusion and Flux.\n" +
+        `Convert the user's idea into ONE detailed image-generation prompt for the "${v.platform || "General"}" platform, in a "${v.style || "Photorealistic"}" style, target aspect ratio ${v.ratio || "1:1"}.\n` +
+        "Include: subject and action, setting, composition/camera angle, lighting, color palette, mood, and relevant quality modifiers.\n" +
+        "If the platform is Midjourney, append correct parameter flags (e.g. --ar, --style, --v) at the end on the same line." +
+        PROMPT_ONLY,
+      user: trim(v.idea, 3000),
+    }),
+  },
+
+  {
+    slug: "video-prompt-generator",
+    name: "Video Prompt Generator",
+    tagline: "Text-to-video prompts for Veo and friends",
+    intro:
+      "Turn an idea into one detailed video prompt: scene, subject and action, camera movement and shot type, " +
+      "lighting, colour grade, mood and pacing — sized to the duration you pick.",
+    modelChoices: PROMPT_MODELS,
+    maxOutputTokens: 1200,
+    outputLabel: "Video prompt",
+    fields: [
+      IDEA_FIELD("e.g. A tuk-tuk weaving through Colombo traffic in the rain at night"),
+      { id: "style", label: "Style / Mood", type: "select", options: ["Cinematic", "Documentary", "Commercial / Ad", "Anime", "Vlog-style", "Fantasy"] },
+      { id: "camera", label: "Camera Movement", type: "select", options: ["Static", "Pan", "Tracking Shot", "Drone / Aerial", "Handheld", "Dolly Zoom"] },
+      { id: "duration", label: "Duration", type: "select", options: ["4s", "8s", "15s"] },
+      { id: "audio", label: "Dialogue / audio cue", type: "select", options: ["No dialogue", "Include dialogue"] },
+    ],
+    build: (v) => ({
+      system:
+        "You are an expert AI video-prompt engineer specializing in modern text-to-video models such as Veo, Kling and Sora.\n" +
+        `Convert the user's idea into ONE detailed video prompt, "${v.style || "Cinematic"}" style, camera movement: "${v.camera || "Static"}", target duration ${v.duration || "8s"}. ` +
+        (v.audio === "Include dialogue"
+          ? "Include a short audio/dialogue cue.\n"
+          : "No dialogue needed, describe ambient sound only if relevant.\n") +
+        "Include: scene description, subject and action, camera movement and shot type, lighting, color grade, mood/atmosphere, and pacing." +
+        PROMPT_ONLY,
+      user: trim(v.idea, 3000),
+    }),
+  },
+
+  {
+    slug: "song-prompt-generator",
+    name: "Song Prompt Generator",
+    tagline: "Style tags and structure for Suno and Udio",
+    intro:
+      "Get a ready-to-use music prompt: a style-tag line with genre, mood, vocal, tempo feel and instrumentation, " +
+      "then a song-structure outline and a one-line lyrical theme. It describes the theme rather than writing the lyrics.",
+    modelChoices: PROMPT_MODELS,
+    maxOutputTokens: 1200,
+    outputLabel: "Song prompt",
+    fields: [
+      IDEA_FIELD("e.g. Missing home while working night shifts in a city far away"),
+      { id: "genre", label: "Genre", type: "select", options: ["Pop", "Hip-Hop", "Rock", "Lo-fi", "EDM", "Country", "R&B", "Cinematic"] },
+      { id: "mood", label: "Mood", type: "select", options: ["Upbeat", "Emotional", "Chill", "Energetic", "Dark", "Romantic"] },
+      { id: "vocal", label: "Vocal Style", type: "select", options: ["Female vocal", "Male vocal", "Duet", "Instrumental only"] },
+    ],
+    build: (v) => ({
+      system:
+        "You are an expert AI music-prompt engineer for tools such as Suno and Udio.\n" +
+        `Convert the user's idea into ONE ready-to-use music generation prompt: a short style-tag line (${v.genre || "Pop"} genre, ${v.mood || "Upbeat"} mood, ${v.vocal || "Female vocal"}, tempo/BPM feel, key instrumentation), followed by a brief song-structure outline (e.g. intro, verse, chorus, bridge, outro) and a one-sentence lyrical theme summary.\n` +
+        "Do not write full lyrics or verses — describe the theme only, not the words themselves." +
+        PROMPT_ONLY,
+      user: trim(v.idea, 3000),
+    }),
+  },
+
+  {
+    slug: "story-prompt-generator",
+    name: "Story Prompt Generator",
+    tagline: "Openings that leave room to write",
+    intro:
+      "Turns an idea into an evocative writing prompt — a scene or situation with somewhere to go. " +
+      "It sets up the story rather than telling it, so the writing is still yours.",
+    modelChoices: PROMPT_MODELS,
+    maxOutputTokens: 1000,
+    outputLabel: "Story prompt",
+    fields: [
+      IDEA_FIELD("e.g. A lighthouse keeper who receives letters that haven't been written yet"),
+      { id: "genre", label: "Genre", type: "select", options: ["Fantasy", "Sci-Fi", "Mystery", "Romance", "Horror", "Adventure", "Slice of Life", "Historical"] },
+      { id: "length", label: "Length", type: "select", options: ["Short story", "Flash fiction", "Novel opening", "Writing exercise"] },
+      { id: "perspective", label: "Perspective", type: "select", options: ["Any", "First person", "Third person"] },
+    ],
+    build: (v) => ({
+      system:
+        "You are an experienced creative writing teacher who designs inspiring story prompts.\n" +
+        `Turn the user's idea into ONE evocative, open-ended writing prompt for a "${v.genre || "Fantasy"}" ${v.length || "Short story"}, written from a "${v.perspective || "Any"}" perspective where relevant.\n` +
+        "The prompt should set a scene or situation and leave room for the writer's own imagination — do not write the story itself, only the prompt that inspires it.\n" +
+        "Keep it to 2-4 sentences." +
+        PROMPT_ONLY,
+      user: trim(v.idea, 3000),
+    }),
+  },
+
+  {
+    slug: "character-prompt-generator",
+    name: "Character Prompt Generator",
+    tagline: "Personas for stories, games and chatbots",
+    intro:
+      "Builds a character profile from an idea: a suggested name, core traits, speech style, a background hook " +
+      "and what drives them — shaped for the use you pick.",
+    modelChoices: PROMPT_MODELS,
+    maxOutputTokens: 1400,
+    outputLabel: "Character profile",
+    fields: [
+      IDEA_FIELD("e.g. A retired train driver who now runs a tea shop and knows everyone's secrets"),
+      { id: "purpose", label: "Purpose", type: "select", options: ["Creative writing character", "Roleplay chatbot", "Game NPC", "Virtual assistant persona"] },
+      { id: "tone", label: "Personality Tone", type: "select", options: ["Friendly", "Mysterious", "Wise", "Quirky", "Serious", "Villainous"] },
+    ],
+    build: (v) => ({
+      system:
+        "You are an expert character and persona designer.\n" +
+        `Turn the user's idea into ONE detailed character profile suited for a "${v.purpose || "Creative writing character"}", with a "${v.tone || "Friendly"}" personality tone. Include: a suggested name, core personality traits, speech style/voice, a short background hook, and motivations.\n` +
+        // Kept verbatim from the source tool. Persona generators are a standing
+        // route to sexualised output, and the instruction has to survive here
+        // rather than being softened into a general "be appropriate".
+        "Safety rules: keep the character strictly all-ages and non-sexual. Never include romantic, sexual, or suggestive content, and never depict or imply a minor in a romantic or sexual context. If the user's request pushes toward any of that, design a wholesome, all-ages-appropriate character instead without commenting on the refusal." +
+        PROMPT_ONLY,
+      user: trim(v.idea, 3000),
+    }),
+  },
+
+  {
+    slug: "logo-prompt-generator",
+    name: "Logo Prompt Generator",
+    tagline: "Brand marks for Midjourney and Ideogram",
+    intro:
+      "Turns a brand idea into a logo prompt with composition, line quality and negative-space direction, " +
+      "finished with the modifiers that keep the result clean and scalable.",
+    modelChoices: PROMPT_MODELS,
+    maxOutputTokens: 1000,
+    outputLabel: "Logo prompt",
+    fields: [
+      IDEA_FIELD("e.g. A sewing machine repair shop that has been in the family for three generations"),
+      { id: "style", label: "Style", type: "select", options: ["Minimalist", "Modern / Geometric", "Vintage / Retro", "Hand-drawn", "Luxury", "Playful / Mascot"] },
+      { id: "type", label: "Logo Type", type: "select", options: ["Icon / Symbol", "Wordmark", "Lettermark / Monogram", "Combination Mark", "Mascot"] },
+      { id: "palette", label: "Color Palette", type: "select", options: ["Monochrome", "Bold Primary", "Pastel", "Earth Tones", "Vibrant"] },
+    ],
+    build: (v) => ({
+      system:
+        "You are an expert AI logo and brand-mark prompt engineer for tools such as Midjourney, DALL-E, and Ideogram.\n" +
+        `Convert the user's brand idea into ONE detailed logo-generation prompt: "${v.style || "Minimalist"}" style, "${v.type || "Icon / Symbol"}" logo type, "${v.palette || "Monochrome"}" color palette. Include composition, line quality, negative space use, and finish with quality modifiers such as "vector style, clean lines, white background, scalable, high contrast".` +
+        PROMPT_ONLY,
+      user: trim(v.idea, 3000),
+    }),
+  },
+];
+
+export const textTools: TextToolConfig[] = [...workTools, ...promptTools];
 
 export const textToolBySlug = (slug: string) => textTools.find((t) => t.slug === slug);
 

@@ -8,9 +8,10 @@
  * the format radios, the highlight tiles, the All/Liked library and the fixed
  * now-playing bar.
  *
- * /api/audio streams raw audio bytes rather than returning a URL, so the blob
- * is kept as an object URL for this session and the library entry remembers
- * the text — a track can always be re-rendered from its own card.
+ * Tracks are requested in stored form (`store: true`), so the library holds a
+ * real URL. An object URL built from the streamed response died with the page,
+ * which left every entry in a reloaded library with a play button that did
+ * nothing — the work looked saved and was not.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -20,6 +21,19 @@ import { packages } from "@/lib/packages";
 import { allClips, type StudioClip } from "@/lib/studio-projects";
 import { useStudioProjects, useStudioCredits, fmtCredits } from "./useStudio";
 import "./speech-studio.css";
+import "./speech-studio.overrides.css";
+
+/**
+ * Close-on-outside-click.
+ *
+ * Next's App Router hydrates into `document`, so React's delegated listener
+ * and ours sit on the SAME node, where stopPropagation cannot stop a sibling.
+ * React opened the dropdown, then our listener closed it in the same click —
+ * it never appeared to open at all. Test what was clicked instead.
+ */
+const KEEP_OPEN = "[data-studio-open]";
+
+type View = "generate" | "library" | "credits" | "payment";
 
 const SAMPLE =
   "Welcome to Chat Free AI. This is a short sample so you can hear how this voice sounds before you spend a single credit on your real script.";
@@ -54,7 +68,7 @@ export default function SpeechStudio() {
   const [vfilter, setVfilter] = useState("");
   const [format, setFormat] = useState<string>("mp3");
   const [filter, setFilter] = useState<"all" | "liked">("all");
-  const [payOpen, setPayOpen] = useState(false);
+  const [view, setView] = useState<View>("generate");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ msg: string; type?: "error" | "success" } | null>(null);
 
@@ -80,7 +94,10 @@ export default function SpeechStudio() {
   const voices = model.voices.filter((v) => v.toLowerCase().includes(vfilter.toLowerCase()));
 
   useEffect(() => {
-    const close = () => setDdOpen(false);
+    const close = (e: MouseEvent) => {
+      if ((e.target as Element | null)?.closest?.(KEEP_OPEN)) return;
+      setDdOpen(false);
+    };
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setDdOpen(false);
     document.addEventListener("click", close);
     document.addEventListener("keydown", esc);
@@ -130,19 +147,18 @@ export default function SpeechStudio() {
       const res = await fetch("/api/audio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelId: model.id, text, voice, format }),
+        body: JSON.stringify({ modelId: model.id, text, voice, format, store: true }),
       });
 
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
         setBusy(false);
         setStatus({ msg: json.message ?? "Generation failed. Please try again.", type: "error" });
-        if (json.error === "plan_required" || json.error === "package_exhausted") setPayOpen(true);
+        if (json.error === "plan_required" || json.error === "package_exhausted") setView("payment");
         return;
       }
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const { url } = (await res.json()) as { url: string };
       const clip: StudioClip = {
         job_id: `${Date.now()}_${Math.floor(Math.random() * 1e6)}`,
         url,
@@ -156,6 +172,7 @@ export default function SpeechStudio() {
       push(clip, projects[0]?.id ?? null);
       setBusy(false);
       setStatus(null);
+      setView("library");
       void refreshCredits();
     } catch {
       setBusy(false);
@@ -166,7 +183,29 @@ export default function SpeechStudio() {
   const highlights = audioModels.slice(0, 3);
 
   return (
-    <div className="cspk" data-free="0" data-logged={credits?.signedIn ? "1" : "0"}>
+    <div className="cspk cspk-hasrail" data-free="0" data-logged={credits?.signedIn ? "1" : "0"}>
+      {/* ============ RAIL ============ */}
+      <div className="cspk-rail">
+        {(
+          [
+            ["generate", "✦", "Create"],
+            ["library", "▦", "Library"],
+            ["credits", "●", "Credits"],
+            ["payment", "💳", "Payment"],
+          ] as [View, string, string][]
+        ).map(([v, ic, l]) => (
+          <button
+            key={v}
+            type="button"
+            className={`cspk-rail-btn${view === v ? " is-active" : ""}`}
+            onClick={() => setView(v)}
+          >
+            <span className="cspk-rail-ic">{ic}</span>
+            <span className="cspk-rail-l">{l}</span>
+          </button>
+        ))}
+      </div>
+
       {/* ============ LEFT: CONTROLS ============ */}
       <div className="cspk-side">
         <div className="cspk-app">
@@ -177,7 +216,7 @@ export default function SpeechStudio() {
 
         <div className="cspk-sec">
           <span className="cspk-sec-t">Model</span>
-          <div className="cspk-dd" onClick={(e) => e.stopPropagation()}>
+          <div className="cspk-dd" data-studio-open>
             <button
               type="button"
               className="cspk-dd-btn"
@@ -328,13 +367,13 @@ export default function SpeechStudio() {
               <span className="cspk-bdot" />
               <span>{credits?.signedIn && credits.cap > 0 ? fmtCredits(credits.remaining) : "—"}</span>
             </span>
-            <button type="button" className="cspk-topup" onClick={() => setPayOpen((o) => !o)}>
+            <button type="button" className="cspk-topup" onClick={() => setView("payment")}>
               Top up
             </button>
           </div>
         </div>
 
-        <div className="cspk-paywrap" style={{ display: payOpen ? "" : "none" }}>
+        <div className="cspk-view cspk-paywrap" hidden={view !== "payment"}>
           <div className="cspk-tiles">
             {packages.map((p) => (
               <Link key={p.id} href="/pricing" className="cspk-tile">
@@ -354,6 +393,7 @@ export default function SpeechStudio() {
           </div>
         </div>
 
+        <div className="cspk-view" hidden={view !== "generate"}>
         <div className="cspk-tiles">
           {highlights.map((m) => (
             <button
@@ -380,6 +420,13 @@ export default function SpeechStudio() {
           ))}
         </div>
 
+        <p className="cspk-view-hint">
+          Paste your script on the left and press Generate. Finished takes land in the Library.
+        </p>
+        </div>
+
+        {/* ---- LIBRARY ---- */}
+        <div className="cspk-view" hidden={view !== "library"}>
         <div className="cspk-libhead">
           <span className="cspk-sec-t">Library</span>
           <div className="cspk-filters">
@@ -460,6 +507,19 @@ export default function SpeechStudio() {
         <p className="cspk-empty" style={{ display: visible.length ? "none" : "" }}>
           Nothing here yet — everything you generate is saved to this library.
         </p>
+        </div>
+
+        {/* ---- CREDITS ---- */}
+        <div className="cspk-view" hidden={view !== "credits"}>
+          <div className="cspk-paywrap">
+            <span className="cspk-sec-t">Your credits</span>
+            <p className="cspk-vnote">
+              {credits?.signedIn && credits.cap > 0
+                ? `${fmtCredits(credits.remaining)} of ${fmtCredits(credits.cap)} monthly credits left. One balance for voice, music, images, video and chat — it resets with your billing period.`
+                : "Voice generation is included in every paid package, billed from the same monthly credits as everything else."}
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* ============ NOW PLAYING ============ */}

@@ -13,7 +13,8 @@
  * shows the monthly package and Payment points at /pricing.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { imageModels, imagePrice, dimensionsFor, type ImageModelConfig } from "@/lib/image-models";
 import { imagePresets, imageIdeas } from "@/lib/image-presets";
@@ -21,6 +22,7 @@ import { packages } from "@/lib/packages";
 import { allClips, type StudioClip } from "@/lib/studio-projects";
 import { useStudioProjects, useStudioCredits, fmtCredits, greeting } from "./useStudio";
 import "./image-studio.css";
+import "./image-studio.overrides.css";
 
 type View = "generate" | "project" | "browser" | "guess" | "credits" | "payment";
 type EditTool = "redraw" | "erase" | "expand" | "enhance";
@@ -53,6 +55,21 @@ const EDIT_TOOLS: { tool: EditTool; label: string; ic: string; ph: string }[] = 
   { tool: "expand", label: "Expand", ic: "⤢", ph: "Optional: what should appear in the extended areas…" },
   { tool: "enhance", label: "Enhance Image", ic: "✦", ph: "Optional: extra enhancement instructions…" },
 ];
+
+/**
+ * Close-on-outside-click.
+ *
+ * Next's App Router hydrates into `document`, so React's delegated listener
+ * and any listener we add to `document` sit on the SAME node. stopPropagation
+ * in a React handler cannot stop a sibling listener on that node — React runs
+ * first (it registered at hydration), then ours ran and closed the popover in
+ * the very same click. Nothing ever appeared to open.
+ *
+ * So don't rely on propagation at all: ask whether the click landed inside
+ * anything marked as part of an open surface. `closest` also crosses portals,
+ * which `ref.contains` would not.
+ */
+const KEEP_OPEN = "[data-studio-open]";
 
 const PROVIDER_COLOR: Record<string, string> = {
   OpenAI: "#10a37f",
@@ -87,8 +104,25 @@ function ideaGradient(seed: string) {
  * library this app already ships: full example prompts first, then each style
  * preset phrased as a startable prompt.
  */
+/**
+ * A card title has one line and ellipsises, so cutting the prompt at a fixed
+ * character count only produced a second, uglier truncation mid-word — "A
+ * ceramic mug of tea on a wi". Cut on a word boundary instead and let the
+ * description carry the full prompt.
+ */
+function ideaTitle(prompt: string) {
+  const first = prompt.split(/[,.—]/)[0].trim();
+  const words = first.split(/\s+/);
+  let out = "";
+  for (const w of words) {
+    if (out && (out + " " + w).length > 26) break;
+    out = out ? `${out} ${w}` : w;
+  }
+  return out.replace(/^./, (c) => c.toUpperCase());
+}
+
 const IDEAS: { title: string; prompt: string }[] = [
-  ...imageIdeas.map((p) => ({ title: p.split(",")[0].slice(0, 28), prompt: p })),
+  ...imageIdeas.map((p) => ({ title: ideaTitle(p), prompt: p })),
   ...imagePresets.flatMap((g) =>
     g.options.slice(0, 4).map((o) => ({ title: `${g.label} · ${o.label}`, prompt: o.append })),
   ),
@@ -142,6 +176,8 @@ export default function ImageStudio() {
   const [addMode, setAddMode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [zipping, setZipping] = useState<string | null>(null);
+  const [floatTools, setFloatTools] = useState<{ left: number; top: number } | null>(null);
+  const [srcPos, setSrcPos] = useState<{ left: number; top: number } | null>(null);
 
   /* mask editor */
   const [editorOpen, setEditorOpen] = useState(false);
@@ -158,6 +194,7 @@ export default function ImageStudio() {
   const maskRef = useRef<HTMLCanvasElement>(null);
   const histRef = useRef<ImageData[]>([]);
   const drawingRef = useRef(false);
+  const editBarRef = useRef<HTMLButtonElement>(null);
   const editFileRef = useRef<HTMLInputElement>(null);
   const framesFileRef = useRef<HTMLInputElement>(null);
   const frameSlotRef = useRef(0);
@@ -168,11 +205,32 @@ export default function ImageStudio() {
   const { projects, currentId, setCurrentId, push, remove } = useStudioProjects("image");
   const { credits, refresh: refreshCredits } = useStudioCredits();
 
+  /**
+   * false while server-rendering and during hydration, true after.
+   *
+   * The clock and the window are browser-only facts, so the greeting and the
+   * portalled panels have to wait for them — rendering either on the server
+   * produces markup the client then disagrees with. useSyncExternalStore with
+   * a never-changing store is the sanctioned way to ask "am I hydrated yet"
+   * without a state update in an effect.
+   */
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+
   const model = useMemo(() => imageModels.find((m) => m.id === modelId)!, [modelId]);
   const ratios = model.aspectRatios;
   const price = imagePrice(model, sizeTier ?? undefined);
   const dims = dimensionsFor(ratios.includes(aspect) ? aspect : ratios[0], price.megapixels);
-  const resTiers = model.qualityTiers?.map((q) => q.label) ?? ["Standard"];
+  /**
+   * Only models with real quality tiers get a resolution row. Inventing a
+   * "Standard" button for the rest put a control on screen that changed
+   * nothing and a spec in the bar that meant nothing.
+   */
+  const resTiers = model.qualityTiers?.map((q) => q.label) ?? [];
+  const hasTiers = resTiers.length > 0;
   const maxCount = Math.min(5, model.maxImages ?? 1);
   const current = projects.find((p) => p.id === currentId) ?? null;
   const browserClips = useMemo(() => allClips(projects), [projects]);
@@ -200,9 +258,12 @@ export default function ImageStudio() {
   }, []);
 
   useEffect(() => {
-    const close = () => {
+    const close = (e: MouseEvent) => {
+      if ((e.target as Element | null)?.closest?.(KEEP_OPEN)) return;
       setPop(null);
       setEditToolsOpen(false);
+      setSrcMenu(null);
+      setModelsOpen(false);
     };
     document.addEventListener("click", close);
     return () => {
@@ -211,16 +272,46 @@ export default function ImageStudio() {
     };
   }, []);
 
+  /**
+   * On a wide screen the edit tools float beside the sidebar instead of
+   * pushing its contents down — the plugin did this by reparenting to <body>,
+   * because the sidebar's backdrop-filter creates a containing block that
+   * traps position:fixed. A portal is the React equivalent. Below 861px the
+   * panel stays inline under the bar, where there is room for it.
+   */
+  const placeTools = useCallback(() => {
+    const bar = editBarRef.current;
+    if (!bar || window.innerWidth < 861) return setFloatTools(null);
+    const r = bar.getBoundingClientRect();
+    setFloatTools({ left: r.right + 14, top: r.top });
+  }, []);
+
+  useEffect(() => {
+    if (!editToolsOpen) return;
+    placeTools();
+    window.addEventListener("resize", placeTools);
+    window.addEventListener("scroll", placeTools, true);
+    return () => {
+      window.removeEventListener("resize", placeTools);
+      window.removeEventListener("scroll", placeTools, true);
+    };
+  }, [editToolsOpen, placeTools]);
+
   const goto = (v: View) => setView((cur) => (cur === v ? "generate" : v));
 
-  /* ---------------- viewer sizing (plugin's applyViewerAspect) ---------------- */
+  /**
+   * Viewer sizing (the plugin's applyViewerAspect), expressed in CSS instead
+   * of pixels. Reading window.innerHeight during render made the server and
+   * the browser produce different style attributes; `calc` on viewport units
+   * gives the same result without the mismatch, and it also survives a resize
+   * or a rotation, which the pixel version did not.
+   */
   const viewerStyle = useMemo(() => {
     const [w, h] = (shown?.aspect ?? aspect).split(":").map((n) => parseFloat(n) || 1);
-    const maxH = typeof window === "undefined" ? 700 : Math.round(window.innerHeight * 0.8);
     return {
       aspectRatio: `${w} / ${h}`,
-      maxWidth: `${Math.min(880, Math.max(260, Math.round(maxH * (w / h))))}px`,
-    };
+      maxWidth: `min(880px, max(260px, calc(80vh * ${(w / h).toFixed(4)})))`,
+    } as React.CSSProperties;
   }, [shown, aspect]);
 
   /* ---------------- frames ---------------- */
@@ -273,9 +364,16 @@ export default function ImageStudio() {
     return shown.url;
   }, [shown]);
 
-  function openSrcMenu(t: (typeof EDIT_TOOLS)[number]) {
+  function openSrcMenu(t: (typeof EDIT_TOOLS)[number], from: DOMRect) {
     setSrcMenu({ tool: t.tool, label: t.label, ph: t.ph });
     setEditToolsOpen(false);
+    // fixed positioning with no offsets pins the menu wherever it happens to
+    // sit in flow — usually off-screen. Anchor it under the tool that opened
+    // it, clamped so it can never leave the viewport.
+    setSrcPos({
+      left: Math.max(10, Math.min(window.innerWidth - 240, from.left + 20)),
+      top: Math.max(10, Math.min(window.innerHeight - 190, from.bottom + 8)),
+    });
   }
 
   async function loadEditor(src: string, meta: { tool: EditTool; label: string; ph: string }) {
@@ -365,20 +463,17 @@ export default function ImageStudio() {
     const ctx = out.getContext("2d")!;
     ctx.drawImage(base, 0, 0);
     if (used) ctx.drawImage(mask, 0, 0);
-    setPendingEdit({
+    // encode once — a 1024px JPEG is not cheap to produce twice
+    const edit = {
       tool: edTool.tool,
       label: edTool.label,
       image: out.toDataURL("image/jpeg", 0.87),
       maskUsed: used,
-    });
+    };
+    setPendingEdit(edit);
     setPrompt(edPrompt);
     setEditorOpen(false);
-    void runGenerate(false, edPrompt, {
-      tool: edTool.tool,
-      label: edTool.label,
-      image: out.toDataURL("image/jpeg", 0.87),
-      maskUsed: used,
-    });
+    void runGenerate(false, edPrompt, edit);
   }
 
   /* ---------------- download ---------------- */
@@ -487,7 +582,7 @@ export default function ImageStudio() {
     const specs = {
       model: useModel.id,
       aspect: useModel.aspectRatios.includes(aspect) ? aspect : useModel.aspectRatios[0],
-      size: sizeTier ?? resTiers[0],
+      size: hasTiers ? (sizeTier ?? resTiers[0]) : "",
     };
 
     setStatus(null);
@@ -507,6 +602,11 @@ export default function ImageStudio() {
 
     let launched = 0;
     let failed = false;
+    let secondStarted = false;
+    // The project id is only known once the first image lands. Two workers
+    // starting together both saw `pid === null` and each created a project, so
+    // a ×4 run produced four one-image projects instead of one with four. The
+    // second worker now waits for the first result and inherits its project.
     let pid: string | null = isExtend ? currentId : null;
 
     const finish = () => {
@@ -530,7 +630,7 @@ export default function ImageStudio() {
             modelId: useModel.id,
             prompt: effPrompt,
             aspectRatio: specs.aspect,
-            ...(useModel.qualityTiers ? { quality: specs.size } : {}),
+            ...(useModel.qualityTiers && specs.size ? { quality: specs.size } : {}),
             ...(references.length ? { references } : {}),
           }),
         });
@@ -561,8 +661,13 @@ export default function ImageStudio() {
           prompt: (ed ? `[${ed.label}] ` : "") + p,
           ts: Date.now(),
         };
-        pid = push(clip, pid ?? (done > 0 ? currentId : null));
+        pid = push(clip, pid);
         done++;
+
+        if (done === 1 && total > 1 && !secondStarted) {
+          secondStarted = true;
+          void step();
+        }
 
         if (done >= total) {
           finish();
@@ -581,7 +686,6 @@ export default function ImageStudio() {
     };
 
     void step();
-    if (total > 1) void step();
   }
 
   function newProject() {
@@ -633,29 +737,51 @@ export default function ImageStudio() {
               {/* ---------- LEFT SIDEBAR ---------- */}
               <div className="aig-side aig-controls">
                 <button
+                  ref={editBarRef}
                   type="button"
                   className="aig-edit-bar"
                   aria-expanded={editToolsOpen}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEditToolsOpen((o) => !o);
-                  }}
+                  data-studio-open
+                  onClick={() => setEditToolsOpen((o) => !o)}
                 >
                   <span className="aig-edit-bar-ic">✎</span>
                   <span className="aig-edit-bar-t">Image Edit Tools</span>
                   <span className="aig-model-bar-chev">›</span>
                 </button>
-                <div
-                  className="aig-edit-tools"
-                  style={{ display: editToolsOpen ? "flex" : "none" }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {EDIT_TOOLS.map((t) => (
-                    <button key={t.tool} type="button" className="aig-etool" onClick={() => openSrcMenu(t)}>
-                      <span className="aig-etool-ic">{t.ic}</span> {t.label}
-                    </button>
+                {editToolsOpen && (floatTools && mounted
+                  ? createPortal(
+                      <div
+                        className="aig-edit-tools aig-float"
+                        style={{ display: "flex", left: floatTools.left, top: floatTools.top }}
+                        data-studio-open
+                      >
+                        {EDIT_TOOLS.map((t) => (
+                          <button
+                            key={t.tool}
+                            type="button"
+                            className="aig-etool"
+                            onClick={(e) => openSrcMenu(t, e.currentTarget.getBoundingClientRect())}
+                          >
+                            <span className="aig-etool-ic">{t.ic}</span> {t.label}
+                          </button>
+                        ))}
+                      </div>,
+                      document.body,
+                    )
+                  : (
+                    <div className="aig-edit-tools" style={{ display: "flex" }} data-studio-open>
+                      {EDIT_TOOLS.map((t) => (
+                        <button
+                          key={t.tool}
+                          type="button"
+                          className="aig-etool"
+                          onClick={(e) => openSrcMenu(t, e.currentTarget.getBoundingClientRect())}
+                        >
+                          <span className="aig-etool-ic">{t.ic}</span> {t.label}
+                        </button>
+                      ))}
+                    </div>
                   ))}
-                </div>
                 <input
                   ref={editFileRef}
                   type="file"
@@ -676,6 +802,7 @@ export default function ImageStudio() {
                   type="button"
                   className="aig-model-bar"
                   aria-expanded={modelsOpen}
+                  data-studio-open
                   onClick={() => setModelsOpen((o) => !o)}
                 >
                   <span className="aig-model-bar-ic" style={{ background: activeMeta.color }}>
@@ -688,7 +815,7 @@ export default function ImageStudio() {
                   <span className="aig-model-bar-chev">›</span>
                 </button>
 
-                <div className={`aig-models aig-models-collapsed${modelsOpen ? " aig-open" : ""}`}>
+                <div className={`aig-models aig-models-collapsed${modelsOpen ? " aig-open" : ""}`} data-studio-open>
                   {visibleModels.map((m) => {
                     const meta = modelMeta(m);
                     return (
@@ -805,7 +932,7 @@ export default function ImageStudio() {
                   <div
                     className="aig-pop aig-pop-aspect"
                     style={{ display: pop === "aspect" ? "block" : "none" }}
-                    onClick={(e) => e.stopPropagation()}
+                    data-studio-open
                   >
                     <div className="aig-pop-title">Aspect Ratio</div>
                     <div className="aig-aspect-grid">
@@ -822,26 +949,30 @@ export default function ImageStudio() {
                         </button>
                       ))}
                     </div>
-                    <div className="aig-pop-title">Resolution</div>
-                    <div className="aig-res-row">
-                      {resTiers.map((r) => (
-                        <button
-                          key={r}
-                          type="button"
-                          className={`aig-res${(sizeTier ?? resTiers[0]) === r ? " active" : ""}`}
-                          data-size={r}
-                          onClick={() => setSizeTier(r)}
-                        >
-                          {r}
-                        </button>
-                      ))}
-                    </div>
+                    {hasTiers && (
+                      <>
+                        <div className="aig-pop-title">Resolution</div>
+                        <div className="aig-res-row">
+                          {resTiers.map((r) => (
+                            <button
+                              key={r}
+                              type="button"
+                              className={`aig-res${(sizeTier ?? resTiers[0]) === r ? " active" : ""}`}
+                              data-size={r}
+                              onClick={() => setSizeTier(r)}
+                            >
+                              {r}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   <div
                     className="aig-pop aig-pop-count"
                     style={{ display: pop === "count" ? "block" : "none" }}
-                    onClick={(e) => e.stopPropagation()}
+                    data-studio-open
                   >
                     <div className="aig-pop-title">Generation count</div>
                     <div className="aig-count-list">
@@ -867,24 +998,20 @@ export default function ImageStudio() {
                       type="button"
                       className="aig-ctrl aig-ctrl-aspect"
                       aria-expanded={pop === "aspect"}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPop((x) => (x === "aspect" ? null : "aspect"));
-                      }}
+                      data-studio-open
+                      onClick={() => setPop((x) => (x === "aspect" ? null : "aspect"))}
                     >
                       <span className={`aig-shape aig-ctrl-shape ${SHAPE[aspect] ?? "s-11"}`} />
                       <span className="aig-ctrl-aspect-label">
-                        {aspect} · {sizeTier ?? resTiers[0]}
+                        {hasTiers ? `${aspect} · ${sizeTier ?? resTiers[0]}` : `${aspect} · ${dims.width}×${dims.height}`}
                       </span>
                     </button>
                     <button
                       type="button"
                       className="aig-ctrl aig-ctrl-count"
                       aria-expanded={pop === "count"}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPop((x) => (x === "count" ? null : "count"));
-                      }}
+                      data-studio-open
+                      onClick={() => setPop((x) => (x === "count" ? null : "count"))}
                     >
                       <span className="aig-ctrl-count-ic">⧉</span>
                       <span className="aig-count-label">×{count}</span>
@@ -951,7 +1078,8 @@ export default function ImageStudio() {
               <div className="aig-main">
                 <div className="aig-hero">
                   <h2 className="aig-hero-h">
-                    <span className="aig-hero-greet">{greeting()}</span>, let&apos;s make something
+                    <span className="aig-hero-greet">{mounted ? greeting() : "Hello"}</span>, let&apos;s make
+                    something
                   </h2>
                   <p className="aig-hero-tag">
                     Every top image model on one page — charged from your monthly credits.
@@ -1067,7 +1195,7 @@ export default function ImageStudio() {
                         >
                           <span className="aig-insp-thumb" style={{ backgroundImage: ideaGradient(g.prompt) }} />
                           <span className="aig-insp-title">{g.title}</span>
-                          <span className="aig-insp-desc">{g.prompt.split(/\s+/).slice(0, 10).join(" ")}…</span>
+                          <span className="aig-insp-desc">{g.prompt}</span>
                         </button>
                       ))}
                     </div>
@@ -1393,26 +1521,6 @@ export default function ImageStudio() {
           </div>
         </div>
 
-        {/* ============ EDIT SOURCE MENU ============ */}
-        <div className="aig-edit-src" style={{ display: srcMenu ? "flex" : "none" }}>
-          <button
-            type="button"
-            className="aig-src-cur"
-            style={{ display: shown ? "" : "none" }}
-            onClick={() => {
-              const src = currentImageDataUrl();
-              if (src && srcMenu) void loadEditor(src, srcMenu);
-            }}
-          >
-            <span className="aig-src-ic">▣</span> Use current image
-          </button>
-          <button type="button" className="aig-src-browse" onClick={() => setAssetsOpen(true)}>
-            <span className="aig-src-ic">⧉</span> Browse Assets
-          </button>
-          <button type="button" className="aig-src-upload" onClick={() => editFileRef.current?.click()}>
-            <span className="aig-src-ic">⇧</span> Upload from device
-          </button>
-        </div>
 
         {/* ============ ASSET PICKER ============ */}
         <div className="aig-assets" style={{ display: assetsOpen ? "flex" : "none" }}>
@@ -1440,6 +1548,36 @@ export default function ImageStudio() {
           </div>
         </div>
       </div>
+
+      {/* ============ EDIT SOURCE MENU ============ */}
+      {mounted &&
+        srcMenu &&
+        createPortal(
+          <div
+            className="aig-edit-src"
+            style={{ display: "flex", left: srcPos?.left ?? 20, top: srcPos?.top ?? 80 }}
+            data-studio-open
+          >
+            <button
+              type="button"
+              className="aig-src-cur"
+              style={{ display: shown ? "" : "none" }}
+              onClick={() => {
+                const src = currentImageDataUrl();
+                if (src) void loadEditor(src, srcMenu);
+              }}
+            >
+              <span className="aig-src-ic">▣</span> Use current image
+            </button>
+            <button type="button" className="aig-src-browse" onClick={() => setAssetsOpen(true)}>
+              <span className="aig-src-ic">⧉</span> Browse Assets
+            </button>
+            <button type="button" className="aig-src-upload" onClick={() => editFileRef.current?.click()}>
+              <span className="aig-src-ic">⇧</span> Upload from device
+            </button>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

@@ -33,6 +33,15 @@ export interface GeminiRequest {
   system?: string;
   maxTokens: number;
   signal?: AbortSignal;
+  /**
+   * Media referenced by URL rather than uploaded.
+   *
+   * Gemini fetches these itself during processing, which is why a 90MB video
+   * can be analysed without ever passing through our own server: we hand over
+   * a link, not bytes. Limited to 100MB per request by Gemini, and the URL has
+   * to be reachable without a login.
+   */
+  attachments?: { fileUri: string; mimeType: string }[];
 }
 
 export async function callGemini(req: GeminiRequest): Promise<Response> {
@@ -42,13 +51,28 @@ export async function callGemini(req: GeminiRequest): Promise<Response> {
     .join("\n\n");
   const system = [req.system, systemFromMessages].filter(Boolean).join("\n\n");
 
+  type Part = { text: string } | { file_data: { file_uri: string; mime_type: string } };
+
   const contents = req.messages
     .filter((m) => m.role !== "system")
     .map((m) => ({
       // Gemini calls the assistant "model"; anything else is treated as user
       role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
+      parts: [{ text: m.content }] as Part[],
     }));
+
+  // Media goes on the first user turn, ahead of its text, because the
+  // instruction reads as being about the file that precedes it.
+  if (req.attachments?.length) {
+    const first = contents.find((c) => c.role === "user");
+    if (first) {
+      first.parts.unshift(
+        ...req.attachments.map(
+          (a): Part => ({ file_data: { file_uri: a.fileUri, mime_type: a.mimeType } }),
+        ),
+      );
+    }
+  }
 
   const url = `${req.baseUrl}/models/${encodeURIComponent(req.model)}:streamGenerateContent?alt=sse`;
 

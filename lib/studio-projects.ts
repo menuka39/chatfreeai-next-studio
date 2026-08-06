@@ -36,6 +36,12 @@ export interface StudioClip {
   /** signed URL that survives the provider link expiring */
   download?: string;
   raw?: string;
+  /** stored closing frame this clip was extended FROM, if it was */
+  seedFrame?: string;
+  /** provider seed, carried across a chain so links stay consistent */
+  seed?: number;
+  /** the clip this one continues */
+  parentJobId?: string;
 
   /* audio / speech */
   title?: string;

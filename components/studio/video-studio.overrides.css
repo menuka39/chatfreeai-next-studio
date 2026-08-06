@@ -1,0 +1,168 @@
+/*
+ * Video studio — changes made AFTER the port.
+ *
+ * video-studio.css stays a byte-for-byte copy of the plugin's avg.css so it
+ * can be diffed against the original. Everything that intentionally differs
+ * lives here and loads after it.
+ */
+
+/* ---------------------------------------------------------------------------
+   "New video" column — its own scrollbar
+   The column is sticky (top:20px) but had no height limit and no overflow, so
+   a tall control stack simply ran past the bottom of the viewport with no way
+   to reach the Render button without scrolling the whole page and losing sight
+   of the preview. The image studio's sidebar always had this; the video one
+   did not.
+   --------------------------------------------------------------------------- */
+@media (min-width: 861px) {
+	.avg-panel.avg-controls {
+		max-height: calc(100vh - 40px);
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		scrollbar-width: thin;
+		/* room so the last control isn't flush against the fade */
+		padding-bottom: 18px;
+	}
+	.avg-panel.avg-controls::-webkit-scrollbar {
+		width: 8px;
+	}
+	.avg-panel.avg-controls::-webkit-scrollbar-thumb {
+		background: #ffffff1f;
+		border-radius: 99px;
+	}
+	.avg-panel.avg-controls::-webkit-scrollbar-thumb:hover {
+		background: #ffffff33;
+	}
+}
+
+/* The popover opens upward from a control near the bottom of the column. It
+   lives inside the scroll area, so it scrolls with the controls rather than
+   escaping them — the same behaviour the image studio's sidebar has always
+   had, since that one shipped with overflow from the start. */
+.avg-ctrlwrap {
+	position: relative;
+	z-index: 30;
+}
+
+/* ---------------------------------------------------------------------------
+   Inspiration cards — two per row
+   auto-fill with a 220px minimum put three or four across in this column, so
+   every title was cut mid-word.
+   --------------------------------------------------------------------------- */
+.avg-insp-grid {
+	grid-template-columns: repeat(2, 1fr);
+	gap: 16px;
+}
+
+.avg-insp-title {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* Two lines each, so cards in a row end at the same height. */
+.avg-insp-desc {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	min-height: 2.9em;
+}
+
+/* A showcase clip with no poster renders as a black rectangle until it has
+   buffered. Give the thumb a surface so an empty card still reads as a card. */
+.avg-insp-thumb {
+	background: linear-gradient(135deg, #1c1c24, #121218);
+}
+
+/* ---------------------------------------------------------------------------
+   Mobile
+   --------------------------------------------------------------------------- */
+
+/* Six rail buttons don't fit across a 360px phone once page padding is taken
+   off, so the row pushed the page sideways. Let it scroll instead. */
+@media (max-width: 860px) {
+	.avg-rail {
+		justify-content: flex-start;
+		overflow-x: auto;
+		flex-wrap: nowrap;
+		scrollbar-width: none;
+		-ms-overflow-style: none;
+		scroll-snap-type: x proximity;
+	}
+	.avg-rail::-webkit-scrollbar {
+		display: none;
+	}
+	.avg-rail-btn {
+		flex: 0 0 auto;
+		scroll-snap-align: center;
+	}
+}
+
+@media (min-width: 430px) and (max-width: 860px) {
+	.avg-rail {
+		justify-content: center;
+		overflow-x: visible;
+	}
+}
+
+@media (max-width: 560px) {
+	/* Full width: at 2-up on a phone the 16:9 thumb is a sliver. */
+	.avg-insp-grid {
+		grid-template-columns: 1fr;
+		gap: 12px;
+	}
+	.avg-insp-desc {
+		-webkit-line-clamp: 3;
+		line-clamp: 3;
+		min-height: 0;
+	}
+
+	/* Four aspect columns in a 280px popover leave ~54px per swatch; three
+	   keeps the ratio label under each shape readable. */
+	.avg-pop .avg-pills.avg-aspect-grid {
+		grid-template-columns: repeat(3, 1fr);
+	}
+
+	/* Duration and resolution pills wrap rather than overflow the popover. */
+	.avg-pop .avg-pills.avg-res-row,
+	.avg-pop .avg-pills.avg-dur-row {
+		gap: 10px 14px;
+	}
+
+	.avg-hero-h {
+		font-size: clamp(22px, 7vw, 30px);
+	}
+
+	/* iOS zooms any input under 16px on focus, which shifts the whole layout. */
+	.avg-prompt {
+		font-size: 16px;
+	}
+
+	/* Long model names and clip rows must not widen the page. */
+	.avg-meta,
+	.avg-viewer-actions {
+		flex-wrap: wrap;
+	}
+	.avg-project-clips,
+	.avg-suggest {
+		overflow-x: auto;
+		scrollbar-width: none;
+	}
+	.avg-project-clips::-webkit-scrollbar,
+	.avg-suggest::-webkit-scrollbar {
+		display: none;
+	}
+	.avg-browsegrid {
+		grid-template-columns: repeat(2, 1fr);
+	}
+}
+
+/* Nothing inside the studio may widen the page. */
+.avg-wrap,
+.avg-studio.avg-app,
+.avg-views {
+	max-width: 100%;
+	overflow-x: clip;
+}
