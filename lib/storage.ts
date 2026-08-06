@@ -60,8 +60,19 @@ export async function createSignedUploadUrl(
   try {
     const res = await fetch(`${url}/storage/v1/object/upload/sign/${BUCKET}/${path}`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      // BOTH headers, as everywhere else we talk to Supabase. The gateway
+      // routes on `apikey`; with only Authorization set it never identifies the
+      // project, and Storage then fails trying to parse the credential itself —
+      // "Invalid Compact JWS", which reads like a bad key rather than a missing
+      // header. Newer `sb_secret_…` keys aren't JWTs at all, so they trip it
+      // every time.
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({}),
+      signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) {
       console.error("[storage] sign upload failed", res.status, (await res.text()).slice(0, 300));
@@ -87,8 +98,14 @@ export async function deletePublicAsset(path: string): Promise<boolean> {
   try {
     const res = await fetch(`${url}/storage/v1/object/${BUCKET}/${path}`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${key}` },
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(15000),
     });
+    // A failed delete leaves an uploaded clip sitting in a public bucket, so it
+    // is worth saying so rather than returning false in silence.
+    if (!res.ok) {
+      console.error("[storage] delete failed", res.status, (await res.text()).slice(0, 300));
+    }
     return res.ok;
   } catch {
     return false;
