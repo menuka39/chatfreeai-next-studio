@@ -1,3 +1,5 @@
+import { openRouterKey } from "./openrouter";
+
 /**
  * Live price oracle.
  *
@@ -87,7 +89,7 @@ function parsePricing(entry: Record<string, unknown>): LivePrice {
 }
 
 async function fetchAll(): Promise<Map<string, LivePrice>> {
-  const key = process.env.OPENROUTER_API_KEY;
+  const key = openRouterKey();
   const prices = new Map<string, LivePrice>();
   const endpoints = [
     "https://openrouter.ai/api/v1/models",

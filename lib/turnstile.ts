@@ -32,6 +32,8 @@ export const turnstileConfigured = () =>
 
 const secret = () => process.env.TURNSTILE_SECRET_KEY ?? "";
 const signingKey = () =>
+  // deliberately the raw value: this is a signing secret, and trimming it
+  // would change every signature already issued
   process.env.TURNSTILE_SECRET_KEY ?? process.env.OPENROUTER_API_KEY ?? "insecure-dev-secret";
 
 export interface VerifyResult {

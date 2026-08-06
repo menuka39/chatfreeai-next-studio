@@ -7,6 +7,7 @@ import { packageById } from "@/lib/packages";
 import { effectiveCredits, type LimitId } from "@/lib/plan-limits";
 import { charge, userMonthlyKey } from "@/lib/quota";
 import { getSession, planFor } from "@/lib/session";
+import { openRouterKey } from "@/lib/openrouter";
 
 export const runtime = "nodejs";
 // Vercel: submits the job and returns; polling is separate.
@@ -26,7 +27,7 @@ function deny(status: number, code: string, message: string, extra: Record<strin
  * refunded automatically if the job fails.
  */
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = openRouterKey();
   if (!apiKey) return deny(500, "not_configured", "OPENROUTER_API_KEY is not set.");
 
   let body: {
@@ -270,8 +271,8 @@ async function persistVideo(url: string): Promise<string | null> {
     let headers: Record<string, string> = {};
     try {
       const host = new URL(url).hostname;
-      if (/(^|\.)openrouter\.ai$/i.test(host) && process.env.OPENROUTER_API_KEY) {
-        headers = { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}` };
+      if (/(^|\.)openrouter\.ai$/i.test(host) && openRouterKey()) {
+        headers = { Authorization: `Bearer ${openRouterKey()}` };
       }
     } catch {
       return null;
@@ -303,7 +304,7 @@ async function persistVideo(url: string): Promise<string | null> {
 }
 
 export async function GET(req: NextRequest) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = openRouterKey();
   if (!apiKey) return deny(500, "not_configured", "OPENROUTER_API_KEY is not set.");
 
   const jobId = req.nextUrl.searchParams.get("jobId");

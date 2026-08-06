@@ -5,6 +5,7 @@ import { livePrices } from "@/lib/price-oracle";
 import { charge, nextUtcMidnight } from "@/lib/quota";
 import { getSession, planFor, clientIp } from "@/lib/session";
 import { resumeAccess, assistKey } from "@/lib/resume-access";
+import { openRouterKey } from "@/lib/openrouter";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -65,7 +66,7 @@ function buildPrompt(action: Action, ctx: Record<string, string>) {
  * feature their subscription already includes.
  */
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = openRouterKey();
   if (!apiKey) return deny(500, "not_configured", "OPENROUTER_API_KEY is not set.");
 
   let body: { action?: Action; modelId?: string; targetRole?: string; notes?: string; deviceId?: string };

@@ -5,6 +5,7 @@ import { packageById } from "@/lib/packages";
 import { effectiveCredits, type LimitId } from "@/lib/plan-limits";
 import { charge, userMonthlyKey } from "@/lib/quota";
 import { getSession, planFor } from "@/lib/session";
+import { openRouterKey } from "@/lib/openrouter";
 
 export const runtime = "nodejs";
 // Vercel: image generation is synchronous, up to ~25s + retries.
@@ -23,7 +24,7 @@ function deny(status: number, code: string, message: string, extra: Record<strin
  * Credits are charged up front and refunded if the provider fails.
  */
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = openRouterKey();
   if (!apiKey) return deny(500, "not_configured", "OPENROUTER_API_KEY is not set.");
 
   let body: {

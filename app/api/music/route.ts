@@ -4,6 +4,7 @@ import { getSession, planFor } from "@/lib/session";
 import { effectiveCredits, type LimitId } from "@/lib/plan-limits";
 import { charge, userMonthlyKey } from "@/lib/quota";
 import { uploadPublicAsset } from "@/lib/storage";
+import { openRouterKey } from "@/lib/openrouter";
 
 export const runtime = "nodejs";
 // Lyria Pro can take a couple of minutes for a full song.
@@ -116,7 +117,7 @@ export async function POST(req: NextRequest) {
     await charge(creditKey, session.periodStart, Number.MAX_SAFE_INTEGER, -credits, MONTH_TTL);
   };
 
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = openRouterKey();
   if (!apiKey) {
     await refund();
     return deny(500, "not_configured", "Music generation isn't set up yet.");

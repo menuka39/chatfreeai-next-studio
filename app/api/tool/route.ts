@@ -12,6 +12,7 @@ import {
   RESERVE_CREDITS,
 } from "@/lib/quota";
 import { getSession, planFor, isGuest, clientIp } from "@/lib/session";
+import { openRouterKey } from "@/lib/openrouter";
 
 export const runtime = "nodejs";
 // Vercel: documents can be long, so allow a full streaming window.
@@ -30,7 +31,7 @@ function deny(status: number, code: string, message: string, extra: Record<strin
  * decides the prompt and the output cap, never the rate.
  */
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = openRouterKey();
   if (!apiKey) return deny(500, "not_configured", "OPENROUTER_API_KEY is not set.");
 
   let body: { slug?: string; modelId?: string; values?: Record<string, string>; deviceId?: string };

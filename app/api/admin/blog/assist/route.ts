@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/admin";
+import { openRouterKey } from "@/lib/openrouter";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
     return deny(400, "too_long", `That's too long for one request (max ${MAX_INPUT_CHARS.toLocaleString()} characters) — try it in smaller pieces.`);
   }
 
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = openRouterKey();
   if (!apiKey) return deny(500, "not_configured", "OPENROUTER_API_KEY is not set on the server.");
 
   const upstream = await fetch(OPENROUTER_URL, {

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { verifyVideoUrl } from "@/lib/video-token";
+import { openRouterKey } from "@/lib/openrouter";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -54,8 +55,9 @@ export async function GET(req: NextRequest) {
     // own host — the URL is signed by us, but the host still gets checked
     // before any credential leaves this process.
     const headers: Record<string, string> = {};
-    if (/(^|\.)openrouter\.ai$/i.test(parsed.hostname) && process.env.OPENROUTER_API_KEY) {
-      headers.Authorization = `Bearer ${process.env.OPENROUTER_API_KEY}`;
+    const key = openRouterKey();
+    if (/(^|\.)openrouter\.ai$/i.test(parsed.hostname) && key) {
+      headers.Authorization = `Bearer ${key}`;
     }
     const range = req.headers.get("range");
     if (range) headers.Range = range;

@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { modelById } from "@/lib/models";
 import { charge, nextUtcMidnight } from "@/lib/quota";
 import { getSession, planFor, clientIp } from "@/lib/session";
+import { openRouterKey } from "@/lib/openrouter";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -26,7 +27,7 @@ function deny(status: number, code: string, message: string, extra: Record<strin
 }
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = openRouterKey();
   if (!apiKey) return deny(500, "not_configured", "OPENROUTER_API_KEY is not set.");
 
   let body: { prompt?: string; deviceId?: string; isEditing?: boolean };

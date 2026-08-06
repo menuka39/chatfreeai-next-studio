@@ -6,6 +6,7 @@ import { effectiveCredits, type LimitId } from "@/lib/plan-limits";
 import { charge, userMonthlyKey } from "@/lib/quota";
 import { uploadPublicAsset } from "@/lib/storage";
 import { getSession, planFor } from "@/lib/session";
+import { openRouterKey } from "@/lib/openrouter";
 
 export const runtime = "nodejs";
 // Vercel: TTS is synchronous and returns an audio byte stream.
@@ -24,7 +25,7 @@ function deny(status: number, code: string, message: string, extra: Record<strin
  * known before the call; it is refunded if the provider fails.
  */
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = openRouterKey();
   if (!apiKey) return deny(500, "not_configured", "OPENROUTER_API_KEY is not set.");
 
   let body: { modelId?: string; text?: string; voice?: string; format?: string; store?: boolean };
