@@ -231,6 +231,20 @@ export default function ImageStudio() {
   const drawingRef = useRef(false);
   const editBarRef = useRef<HTMLButtonElement>(null);
   const editFileRef = useRef<HTMLInputElement>(null);
+  /**
+   * Which tool opened the source menu, held in a ref rather than only in state.
+   *
+   * "Upload from device" calls .click() on the hidden file input. That
+   * programmatic click dispatches a real click event that bubbles to document,
+   * and the input sits outside any [data-studio-open] surface — so the
+   * close-on-outside-click handler fired and cleared srcMenu before the user
+   * had even seen the file dialog. By the time `change` arrived the handler
+   * read a null srcMenu and returned, so picking a file did nothing at all.
+   *
+   * A ref survives that, because nothing about closing a menu should erase
+   * which tool the pending file belongs to.
+   */
+  const pendingSrcRef = useRef<{ tool: EditTool; label: string; ph: string } | null>(null);
   const framesFileRef = useRef<HTMLInputElement>(null);
   const frameSlotRef = useRef(0);
   const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -400,7 +414,9 @@ export default function ImageStudio() {
   }, [shown]);
 
   function openSrcMenu(t: (typeof EDIT_TOOLS)[number], from: DOMRect) {
-    setSrcMenu({ tool: t.tool, label: t.label, ph: t.ph });
+    const meta = { tool: t.tool, label: t.label, ph: t.ph };
+    pendingSrcRef.current = meta;
+    setSrcMenu(meta);
     setEditToolsOpen(false);
     // fixed positioning with no offsets pins the menu wherever it happens to
     // sit in flow — usually off-screen. Anchor it under the tool that opened
@@ -867,11 +883,13 @@ export default function ImageStudio() {
                   className="aig-edit-input"
                   accept="image/png,image/jpeg,image/webp"
                   style={{ display: "none" }}
+                  data-studio-open
                   onChange={async (e) => {
                     const f = e.target.files?.[0];
                     e.target.value = "";
-                    if (!f || !srcMenu) return;
-                    void loadEditor(await fileToDataUrl(f), srcMenu);
+                    const meta = pendingSrcRef.current;
+                    if (!f || !meta) return;
+                    void loadEditor(await fileToDataUrl(f), meta);
                   }}
                 />
                 <div className="aig-side-divider" />
@@ -1626,7 +1644,7 @@ export default function ImageStudio() {
             // same reasoning as the editor above: a full-screen picker must not
             // depend on every wrapper between it and the viewport staying free
             // of a containing-block trigger
-            <div className="aig-assets" style={{ display: "flex" }}>
+            <div className="aig-assets" style={{ display: "flex" }} data-studio-open>
           <div className="aig-editor-top">
             <button type="button" className="aig-assets-close" aria-label="Close" onClick={() => setAssetsOpen(false)}>
               ×
@@ -1641,7 +1659,10 @@ export default function ImageStudio() {
                   type="button"
                   className="aig-asset"
                   style={{ backgroundImage: `url(${x.clip.url})` }}
-                  onClick={() => srcMenu && void loadEditor(editableSrc(x.clip.url, x.clip.token), srcMenu)}
+                  onClick={() =>
+                    pendingSrcRef.current &&
+                    void loadEditor(editableSrc(x.clip.url, x.clip.token), pendingSrcRef.current)
+                  }
                 />
               ))}
             </div>
@@ -1669,7 +1690,10 @@ export default function ImageStudio() {
               style={{ display: shown ? "" : "none" }}
               onClick={() => {
                 const src = currentImageDataUrl();
-                if (src) void loadEditor(src, srcMenu);
+                // the ref, like the upload path — one source of truth for
+                // which tool is pending, and immune to the menu being closed
+                const meta = pendingSrcRef.current ?? srcMenu;
+                if (src && meta) void loadEditor(src, meta);
               }}
             >
               <span className="aig-src-ic">▣</span> Use current image
