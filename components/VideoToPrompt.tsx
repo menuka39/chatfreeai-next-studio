@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
+import { planScenes, SCENE_LENGTHS, MAX_SCENES } from "@/lib/scene-plan";
 
 /**
  * Video to Prompt.
@@ -77,12 +78,12 @@ export default function VideoToPrompt() {
   const busy = phase === "uploading" || phase === "analysing";
   const scenes = mode === "scenes" ? parseScenes(output) : [];
   const totalSeconds = scenes.reduce((n, sc) => n + (parseInt(sc.seconds, 10) || 0), 0);
-  // How many clips the plan will come to. Capped server-side too: past a
-  // couple of dozen the model starts summarising to fit, and nobody is going
-  // to hand-render sixty clips anyway.
-  const MAX_SCENES = 24;
-  const plannedScenes = duration ? Math.min(MAX_SCENES, Math.ceil(duration / sceneSeconds)) : 0;
-  const cappedBy = duration ? Math.ceil(duration / sceneSeconds) > MAX_SCENES : false;
+  // The SAME planner the route runs, so the count shown here is the count the
+  // model is asked for. Computing it separately is how the screen came to
+  // promise four scenes for an 18.4s video the server split into three.
+  const plan = planScenes(duration, sceneSeconds);
+  const plannedScenes = plan.length;
+  const cappedBy = plannedScenes >= MAX_SCENES && duration / sceneSeconds > MAX_SCENES;
 
   function copy(text: string, id: string) {
     void navigator.clipboard?.writeText(text);
@@ -278,7 +279,7 @@ export default function VideoToPrompt() {
         <div style={{ display: mode === "scenes" ? undefined : "none" }}>
           <label className="mb-2 block text-sm font-medium text-white/80">Seconds per scene</label>
           <div className="flex gap-2">
-            {[5, 6, 8, 10, 15].map((n) => (
+            {SCENE_LENGTHS.map((n) => (
               <button
                 key={n}
                 type="button"
@@ -425,6 +426,18 @@ export default function VideoToPrompt() {
             </pre>
           )}
         </div>
+      )}
+
+      {/*
+        A short reply is the visible symptom of the model running out of output
+        budget partway through, and it is worth naming: otherwise a plan that
+        silently stops at scene 2 of 6 looks like the whole answer.
+      */}
+      {phase === "done" && scenes.length > 0 && scenes.length < plannedScenes && (
+        <p className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
+          Only {scenes.length} of {plannedScenes} scenes came back. Try again, or pick a longer
+          scene length so there are fewer of them.
+        </p>
       )}
 
       <p className="text-xs text-white/35">

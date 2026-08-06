@@ -42,6 +42,16 @@ export interface GeminiRequest {
    * to be reachable without a login.
    */
   attachments?: { fileUri: string; mimeType: string }[];
+  /**
+   * How much of the budget the model may spend reasoning before it answers.
+   *
+   * On Gemini 3, maxOutputTokens is a COMBINED ceiling for thinking and
+   * output, and the default level is "high" — so reasoning expands to fill
+   * whatever you allow and the visible answer gets cut off mid-sentence. For
+   * work that is description rather than deduction, "low" leaves the budget
+   * for the thing the caller actually asked for.
+   */
+  thinkingLevel?: "minimal" | "low" | "medium" | "high";
 }
 
 export async function callGemini(req: GeminiRequest): Promise<Response> {
@@ -90,7 +100,10 @@ export async function callGemini(req: GeminiRequest): Promise<Response> {
     body: JSON.stringify({
       contents,
       ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
-      generationConfig: { maxOutputTokens: req.maxTokens },
+      generationConfig: {
+        maxOutputTokens: req.maxTokens,
+        ...(req.thinkingLevel ? { thinkingConfig: { thinkingLevel: req.thinkingLevel } } : {}),
+      },
     }),
     signal: req.signal,
   });
