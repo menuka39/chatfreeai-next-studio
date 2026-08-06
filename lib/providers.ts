@@ -20,7 +20,8 @@
  * models.
  */
 
-export type DirectProvider = "openai" | "anthropic" | "gemini" | "deepseek" | "xai" | "ollama";
+export type DirectProvider =
+  "openai" | "anthropic" | "gemini" | "deepseek" | "xai" | "ollama";
 
 /**
  * PRICING NOTE — read before adding a provider.
@@ -98,167 +99,17 @@ export const PROVIDERS: Record<DirectProvider, ProviderSpec> = {
   },
 };
 
-export interface ResolvedRoute {
-  kind: "direct" | "openrouter";
-  provider?: DirectProvider;
-  baseUrl: string;
-  apiKey: string;
-  /** the model id to send — provider-native when direct, OpenRouter's otherwise */
-  model: string;
-  openaiCompatible: boolean;
-}
-
 /**
- * Decide where one request goes.
+ * What remains of the direct-provider layer.
  *
- * `directModel` is the provider's own id for the model (`gpt-4o-mini`),
- * which is not always the tail of the OpenRouter id — so it is stated
- * explicitly rather than derived by string-splitting, which would break
- * silently the first time a naming convention differed.
+ * Chat used to call some providers directly and fall back to OpenRouter. The
+ * saving was small and the cost was real: every provider's own protocol and
+ * its own model ids to maintain, and those ids drift — a model ships as
+ * `-preview`, goes GA under a new number, and the old string 404s. Chat now
+ * goes through OpenRouter only, which does provider failover itself.
+ *
+ * The table below survives because Video to Prompt still calls Google
+ * directly: it needs Gemini's external-URL file input to read an uploaded
+ * clip, and no aggregator exposes that.
  */
-export function resolveRoute(opts: {
-  openrouterModel: string;
-  provider?: DirectProvider;
-  directModel?: string;
-}): ResolvedRoute {
-  const openrouter: ResolvedRoute = {
-    kind: "openrouter",
-    baseUrl: `${process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai"}/api/v1`,
-    apiKey: process.env.OPENROUTER_API_KEY ?? "",
-    model: opts.openrouterModel,
-    openaiCompatible: true,
-  };
-
-  if (!opts.provider || !opts.directModel) return openrouter;
-
-  const spec = PROVIDERS[opts.provider];
-  const key = process.env[spec.envKey] ?? "";
-  const baseUrl = (spec.envBaseUrl ? process.env[spec.envBaseUrl] : "") || spec.baseUrl;
-
-  // Ollama is enabled by having somewhere to reach it; everyone else by a key
-  const configured = spec.keyless ? Boolean(spec.envBaseUrl && process.env[spec.envBaseUrl]) : Boolean(key);
-  if (!configured) return openrouter;
-
-  return {
-    kind: "direct",
-    provider: opts.provider,
-    baseUrl,
-    apiKey: key,
-    model: opts.directModel,
-    openaiCompatible: spec.openaiCompatible,
-  };
-}
-
-/** Which providers are configured — for the admin screen and startup logging. */
-export function configuredProviders(): { id: DirectProvider; label: string; ready: boolean }[] {
-  return (Object.keys(PROVIDERS) as DirectProvider[]).map((id) => {
-    const spec = PROVIDERS[id];
-    const ready = spec.keyless
-      ? Boolean(spec.envBaseUrl && process.env[spec.envBaseUrl])
-      : Boolean(process.env[spec.envKey]);
-    return { id, label: spec.label, ready };
-  });
-}
-
-/* ------------------------------------------------------------------ *
- * Circuit breaker
- * ------------------------------------------------------------------ */
-
-/**
- * Stop hammering a provider that is failing.
- *
- * Plain fallback retries every request: the first user waits for a timeout
- * and then a retry, and so does the hundredth. A breaker remembers instead —
- * after a few consecutive failures it stops trying that provider entirely
- * for a cooling-off period and goes straight to OpenRouter, so only the
- * requests that discovered the outage pay for it.
- *
- * Deliberately not backed by Redis. State is per server instance, which
- * means several instances each learn independently — a few extra failed
- * requests during an outage. The alternative is a network round-trip on
- * every single chat request to check a shared flag, which costs more, all
- * the time, than the thing it saves.
- */
-
-const FAILURE_THRESHOLD = 3;
-const OPEN_MS = 2 * 60 * 1000;
-
-interface BreakerState {
-  failures: number;
-  openedAt: number | null;
-  lastError: string;
-}
-
-const breakers = new Map<DirectProvider, BreakerState>();
-
-const stateFor = (p: DirectProvider): BreakerState =>
-  breakers.get(p) ?? { failures: 0, openedAt: null, lastError: "" };
-
-/** Whether this provider is currently allowed to take traffic. */
-export function providerAvailable(provider: DirectProvider): boolean {
-  const s = stateFor(provider);
-  if (s.openedAt === null) return true;
-  if (Date.now() - s.openedAt < OPEN_MS) return false;
-  // cooling-off elapsed — let one request through to test the water. It
-  // either succeeds and closes the circuit, or fails and re-opens it.
-  breakers.set(provider, { ...s, openedAt: null, failures: FAILURE_THRESHOLD - 1 });
-  return true;
-}
-
-export function recordProviderSuccess(provider: DirectProvider): void {
-  const s = stateFor(provider);
-  if (s.failures === 0 && s.openedAt === null) return;
-  breakers.set(provider, { failures: 0, openedAt: null, lastError: "" });
-  console.log(`[provider] ${provider} recovered — direct routing resumed`);
-}
-
-export function recordProviderFailure(provider: DirectProvider, reason: string): void {
-  const s = stateFor(provider);
-  const failures = s.failures + 1;
-  const opening = failures >= FAILURE_THRESHOLD && s.openedAt === null;
-  breakers.set(provider, {
-    failures,
-    openedAt: opening ? Date.now() : s.openedAt,
-    lastError: reason.slice(0, 200),
-  });
-  if (opening) {
-    // Loud on purpose. A silent fallback means a broken key can sit
-    // unnoticed for months while every request quietly costs more.
-    console.error(
-      `[provider] ${provider} failed ${failures}x — falling back to OpenRouter for ` +
-        `${OPEN_MS / 60000} minutes. Last error: ${reason.slice(0, 200)}`,
-    );
-  }
-}
-
-export interface ProviderStatus {
-  id: DirectProvider;
-  label: string;
-  /** a key (or base URL) is present */
-  configured: boolean;
-  /** currently taking traffic */
-  healthy: boolean;
-  failures: number;
-  openedAt: number | null;
-  lastError: string;
-}
-
-/** Everything the admin screen needs to see what is actually happening. */
-export function providerStatuses(): ProviderStatus[] {
-  return (Object.keys(PROVIDERS) as DirectProvider[]).map((id) => {
-    const spec = PROVIDERS[id];
-    const configured = spec.keyless
-      ? Boolean(spec.envBaseUrl && process.env[spec.envBaseUrl])
-      : Boolean(process.env[spec.envKey]);
-    const s = stateFor(id);
-    return {
-      id,
-      label: spec.label,
-      configured,
-      healthy: s.openedAt === null,
-      failures: s.failures,
-      openedAt: s.openedAt,
-      lastError: s.lastError,
-    };
-  });
-}
+export {};

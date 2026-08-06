@@ -74,7 +74,12 @@ export async function callGemini(req: GeminiRequest): Promise<Response> {
     }
   }
 
-  const url = `${req.baseUrl}/models/${encodeURIComponent(req.model)}:streamGenerateContent?alt=sse`;
+  // Correct the model name if Google has renamed it — see resolveModelName.
+  // Deliberately NOT a fallback to some other model: credits are charged on
+  // the catalogue entry the caller picked, so silently answering from a
+  // different tier would bill the user for a model they didn't get.
+  const modelName = await resolveModelName(req.baseUrl, req.apiKey, req.model);
+  const url = `${req.baseUrl}/models/${encodeURIComponent(modelName)}:streamGenerateContent?alt=sse`;
 
   return fetch(url, {
     method: "POST",
@@ -176,4 +181,97 @@ export function geminiToOpenAIStream(body: ReadableStream<Uint8Array>): Readable
       }
     },
   });
+}
+
+/**
+ * Correct a model name that Google has since renamed.
+ *
+ * Catalogue ids are written from announcements, and the real names drift: a
+ * model ships as `-preview`, goes GA under a new number, and the old string
+ * starts returning 404 — which is exactly how `gemini-3-flash` broke. Checking
+ * against ListModels turns that class of failure into a no-op.
+ *
+ * Only name VARIANTS are accepted (exact, then prefix, so `gemini-3.1-pro`
+ * still finds `gemini-3.1-pro-preview`). Never a different model: substituting
+ * across tiers would change both the answer and the true cost while the user
+ * is billed at the rate of the model they chose.
+ *
+ * If nothing matches, the requested name is returned unchanged so the caller
+ * gets Google's own error rather than a guess of ours.
+ */
+export async function resolveModelName(
+  baseUrl: string,
+  apiKey: string,
+  requested: string,
+): Promise<string> {
+  const names = await listGeminiModels(baseUrl, apiKey);
+  if (!names.length) return requested;
+  if (names.includes(requested)) return requested;
+  const variant = names.find((n) => n.startsWith(requested));
+  if (variant) {
+    console.warn(`[gemini] "${requested}" not found; using "${variant}"`);
+    return variant;
+  }
+  return requested;
+}
+
+/**
+ * Pick a Gemini model name that the API will actually accept.
+ *
+ * Model ids in our catalogue are written from announcements, and Google's real
+ * names drift: a model ships as `-preview`, goes GA under a new number, and the
+ * old string starts 404ing. Hard-coding one name means a rename takes a feature
+ * down until someone notices.
+ *
+ * So ask. ListModels is one cheap call, cached for an hour, and the answer is
+ * authoritative. `preferred` is tried in order — first as an exact match, then
+ * as a prefix, so `gemini-3.6-flash` still matches `gemini-3.6-flash-preview`.
+ */
+interface ModelCache {
+  at: number;
+  names: string[];
+}
+let modelCache: ModelCache | null = null;
+const MODEL_TTL = 60 * 60 * 1000;
+
+export async function listGeminiModels(baseUrl: string, apiKey: string): Promise<string[]> {
+  if (modelCache && Date.now() - modelCache.at < MODEL_TTL) return modelCache.names;
+  try {
+    const res = await fetch(`${baseUrl}/models?pageSize=200`, {
+      headers: { "x-goog-api-key": apiKey },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return modelCache?.names ?? [];
+    const data = (await res.json()) as {
+      models?: { name?: string; supportedGenerationMethods?: string[] }[];
+    };
+    const names = (data.models ?? [])
+      // only models we can actually stream text from
+      .filter((m) => !m.supportedGenerationMethods || m.supportedGenerationMethods.includes("generateContent"))
+      .map((m) => (m.name ?? "").replace(/^models\//, ""))
+      .filter(Boolean);
+    if (names.length) modelCache = { at: Date.now(), names };
+    return names;
+  } catch {
+    return modelCache?.names ?? [];
+  }
+}
+
+export async function resolveGeminiModel(
+  baseUrl: string,
+  apiKey: string,
+  preferred: string[],
+): Promise<string | null> {
+  const names = await listGeminiModels(baseUrl, apiKey);
+  // Nothing to check against (ListModels blocked or down) — trust the first
+  // preference rather than failing outright.
+  if (!names.length) return preferred[0] ?? null;
+
+  for (const want of preferred) {
+    const exact = names.find((n) => n === want);
+    if (exact) return exact;
+    const prefixed = names.find((n) => n.startsWith(want));
+    if (prefixed) return prefixed;
+  }
+  return null;
 }

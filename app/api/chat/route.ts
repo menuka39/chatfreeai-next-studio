@@ -1,9 +1,11 @@
 import { NextRequest } from "next/server";
-import { resolveRoute, providerAvailable, recordProviderSuccess, recordProviderFailure } from "@/lib/providers";
-import { callAnthropic, anthropicToOpenAIStream } from "@/lib/providers/anthropic";
-import { callGemini, geminiToOpenAIStream } from "@/lib/providers/gemini";
 import { modelById, canUseModel, effectiveWeight } from "@/lib/models";
-import { chatFeatures, featureKey, WEB_SEARCH_USD, MAX_REQUEST_CHARS } from "@/lib/chat-features";
+import {
+  chatFeatures,
+  featureKey,
+  WEB_SEARCH_USD,
+  MAX_REQUEST_CHARS,
+} from "@/lib/chat-features";
 import {
   turnstileConfigured,
   verifyTurnstile,
@@ -34,13 +36,19 @@ export const maxDuration = 300;
 
 const OPENROUTER_URL = `${process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai"}/api/v1/chat/completions`;
 
-function deny(status: number, code: string, message: string, extra: Record<string, unknown> = {}) {
+function deny(
+  status: number,
+  code: string,
+  message: string,
+  extra: Record<string, unknown> = {},
+) {
   return Response.json({ error: code, message, ...extra }, { status });
 }
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) return deny(500, "not_configured", "OPENROUTER_API_KEY is not set.");
+  if (!apiKey)
+    return deny(500, "not_configured", "OPENROUTER_API_KEY is not set.");
 
   let body: {
     modelId?: string;
@@ -75,14 +83,22 @@ export async function POST(req: NextRequest) {
 
   // --- premium model gating (base models are open to everyone) ------------
   if (!canUseModel(model, plan)) {
-    return deny(403, "model_locked", `${model.name} is unlocked on our ${model.minPlan} package.`, {
-      requiredPlan: model.minPlan,
-      modelName: model.name,
-    });
+    return deny(
+      403,
+      "model_locked",
+      `${model.name} is unlocked on our ${model.minPlan} package.`,
+      {
+        requiredPlan: model.minPlan,
+        modelName: model.name,
+      },
+    );
   }
 
   const features = chatFeatures(session);
-  const ipHash = createHash("sha256").update(clientIp(req) + (body.deviceId ?? "")).digest("hex").slice(0, 32);
+  const ipHash = createHash("sha256")
+    .update(clientIp(req) + (body.deviceId ?? ""))
+    .digest("hex")
+    .slice(0, 32);
 
   /* ---- attachment limits, enforced HERE and not only in the UI ----------
    * The composer hides what a tier can't use, but a hidden button is not a
@@ -96,16 +112,25 @@ export async function POST(req: NextRequest) {
       (m.content as { type?: string }[]).some((p) => p?.type === "image_url"),
   );
   if (hasImageParts && !features.imageAttachments) {
-    return deny(403, "feature_locked", "Sign in to send images.", { feature: "attachments", signIn: true });
+    return deny(403, "feature_locked", "Sign in to send images.", {
+      feature: "attachments",
+      signIn: true,
+    });
   }
 
   const requestChars = body.messages.reduce(
-    (n, m) => n + (typeof m.content === "string" ? m.content.length : JSON.stringify(m.content).length),
+    (n, m) =>
+      n +
+      (typeof m.content === "string"
+        ? m.content.length
+        : JSON.stringify(m.content).length),
     0,
   );
   const charLimit = MAX_REQUEST_CHARS[features.tier];
   if (requestChars > charLimit) {
-    return deny(413, "request_too_large",
+    return deny(
+      413,
+      "request_too_large",
       features.paid
         ? "That's too much text for one message — try attaching fewer or smaller files."
         : "That's too much text for this plan. Sign in, or upgrade, to send larger files.",
@@ -121,20 +146,31 @@ export async function POST(req: NextRequest) {
   if (features.tier === "guest" && turnstileConfigured()) {
     const alreadyHuman = humanCookieValid(req.cookies.get(HUMAN_COOKIE)?.value);
     if (!alreadyHuman) {
-      const token = typeof body.turnstileToken === "string" ? body.turnstileToken : "";
+      const token =
+        typeof body.turnstileToken === "string" ? body.turnstileToken : "";
       if (!token) {
-        return deny(403, "verification_required", "Quick check that you're not a bot.", {
-          turnstile: true,
-          siteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY,
-        });
+        return deny(
+          403,
+          "verification_required",
+          "Quick check that you're not a bot.",
+          {
+            turnstile: true,
+            siteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY,
+          },
+        );
       }
       const result = await verifyTurnstile(token, clientIp(req));
       if (!result.ok) {
         console.warn("[turnstile] rejected", result.codes);
-        return deny(403, "verification_failed", "That check didn't pass. Please try again.", {
-          turnstile: true,
-          siteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY,
-        });
+        return deny(
+          403,
+          "verification_failed",
+          "That check didn't pass. Please try again.",
+          {
+            turnstile: true,
+            siteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY,
+          },
+        );
       }
       mintHuman = true;
     }
@@ -149,10 +185,20 @@ export async function POST(req: NextRequest) {
   const wantsSearch = Boolean(body.webSearch) || wantsResearch;
 
   if (wantsResearch && !features.research) {
-    return deny(403, "feature_locked", "Research is available once you sign in.", { feature: "research", signIn: true });
+    return deny(
+      403,
+      "feature_locked",
+      "Research is available once you sign in.",
+      { feature: "research", signIn: true },
+    );
   }
   if (wantsSearch && !features.webSearch) {
-    return deny(403, "feature_locked", "Web search isn't available on this plan.", { feature: "webSearch" });
+    return deny(
+      403,
+      "feature_locked",
+      "Web search isn't available on this plan.",
+      { feature: "webSearch" },
+    );
   }
 
   const DAY_TTL = 60 * 60 * 36;
@@ -160,11 +206,15 @@ export async function POST(req: NextRequest) {
 
   if (wantsSearch) {
     const kind = wantsResearch ? "research" : "search";
-    const cap = wantsResearch ? features.researchDaily : features.webSearchDaily;
+    const cap = wantsResearch
+      ? features.researchDaily
+      : features.webSearchDaily;
     const key = featureKey(kind, session, ipHash);
     const res = await charge(key, "", cap, 1, DAY_TTL);
     if (!res.ok) {
-      return deny(429, "feature_limit_reached",
+      return deny(
+        429,
+        "feature_limit_reached",
         wantsResearch
           ? `You've used today's ${cap} research runs. Normal chat and web search still work.`
           : `You've used today's ${cap} web searches. Normal chat still works${features.paid ? "" : " — signing in gives you more"}.`,
@@ -181,7 +231,8 @@ export async function POST(req: NextRequest) {
    * capped and never trusted to be small. Research adds a citation
    * instruction, because an answer built from live sources that doesn't say
    * where anything came from is worse than no search at all. */
-  const clientSystem = typeof body.system === "string" ? body.system.slice(0, 4000).trim() : "";
+  const clientSystem =
+    typeof body.system === "string" ? body.system.slice(0, 4000).trim() : "";
   const researchSystem = wantsResearch
     ? "Answer using the web results provided. Cite the source next to each specific claim, " +
       "prefer recent and primary sources, and say plainly when the results don't answer part " +
@@ -189,7 +240,8 @@ export async function POST(req: NextRequest) {
     : wantsSearch
       ? "Web results are provided. Use them for anything time-sensitive and name the source for specific facts."
       : "";
-  const systemPrompt = [clientSystem, researchSystem].filter(Boolean).join("\n\n") || null;
+  const systemPrompt =
+    [clientSystem, researchSystem].filter(Boolean).join("\n\n") || null;
 
   // --- pick the quota bucket ---------------------------------------------
   const day = utcDayKey();
@@ -201,7 +253,7 @@ export async function POST(req: NextRequest) {
 
   if (plan !== "free") {
     // admin-adjustable in /admin/limits — falls back to lib/packages.ts if never overridden
-  const pkgCredits = await effectiveCredits(session.packageId! as LimitId);
+    const pkgCredits = await effectiveCredits(session.packageId! as LimitId);
     keys = [userMonthlyKey(session.userId!, session.periodStart)];
     period = session.periodStart;
     limit = pkgCredits;
@@ -223,9 +275,15 @@ export async function POST(req: NextRequest) {
     if (!res.ok) {
       // the quota store being down is not the user running out of credits
       if ("storeDown" in res && res.storeDown) {
-        console.error("[chat] quota store unavailable:", res.reason ?? "unknown");
-        return deny(503, "quota_store_unavailable",
-          "Something went wrong on our side. Please try again in a moment.");
+        console.error(
+          "[chat] quota store unavailable:",
+          res.reason ?? "unknown",
+        );
+        return deny(
+          503,
+          "quota_store_unavailable",
+          "Something went wrong on our side. Please try again in a moment.",
+        );
       }
       return deny(
         429,
@@ -238,79 +296,35 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // --- pick the upstream ---------------------------------------------------
-  // Direct when the model declares a provider AND that provider's key is set,
-  // OpenRouter otherwise. See lib/providers.ts — the fallback is the point:
-  // deleting one environment variable restores service without a deploy.
-  const route = resolveRoute({
-    openrouterModel: model.openrouter,
-    provider: model.provider,
-    directModel: model.directModel,
-  });
-
-  // Web search is OpenRouter's plugin, not something a provider API offers.
-  // Sending it direct would be silently ignored — the user would spend a
-  // search and get an answer with no sources — so those requests stay on
-  // OpenRouter regardless of what the model prefers.
-  // A provider whose circuit is open is skipped entirely — no timeout, no
-  // retry, straight to OpenRouter.
-  const directAllowed =
-    route.kind === "direct" && !wantsSearch && providerAvailable(route.provider!);
-  const useDirect = directAllowed && route.openaiCompatible;
-  // Anthropic speaks its own protocol; lib/providers/anthropic.ts translates
-  // both directions so everything downstream stays unchanged.
-  const useAnthropic = directAllowed && route.provider === "anthropic";
-  const useGemini = directAllowed && route.provider === "gemini";
-  const upstreamUrl = useDirect
-    ? `${route.baseUrl}/chat/completions`
-    : `${process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai"}/api/v1/chat/completions`;
-  const upstreamKey = useDirect ? route.apiKey : apiKey;
-  const upstreamModel = useDirect ? route.model : model.openrouter;
-
-  // both non-OpenAI adapters take plain strings; messages are validated
-  // upstream but typed loosely, so normalise once here
-  const plainMessages = messages.map((m: { role: string; content: unknown }) => ({
-    role: m.role,
-    content: typeof m.content === "string" ? m.content : String(m.content ?? ""),
-  }));
-  const adapterArgs = {
-    baseUrl: route.baseUrl,
-    apiKey: route.apiKey,
-    model: route.model,
-    messages: plainMessages,
-    system: systemPrompt || undefined,
-    maxTokens: wantsResearch ? Math.max(limits.maxOutputTokens, 2000) : limits.maxOutputTokens,
-    signal: req.signal,
-  };
-
-  const upstream = useAnthropic
-    ? await callAnthropic(adapterArgs)
-    : useGemini
-      ? await callGemini(adapterArgs)
-      : await fetch(upstreamUrl, {
+  // --- call OpenRouter -----------------------------------------------------
+  // One upstream, deliberately. Calling providers directly saved a little on
+  // their list prices, but it meant maintaining each provider's own protocol
+  // and its own model ids — and those ids drift: a model ships as `-preview`,
+  // goes GA under a new number, and the old string starts returning 404. That
+  // is a whole class of outage bought for a small discount, and OpenRouter
+  // already does provider failover behind its own API.
+  const upstream = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${upstreamKey}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
-      // attribution headers are OpenRouter's; harmless elsewhere but omitted
-      ...(useDirect
-        ? {}
-        : {
-            "HTTP-Referer": process.env.SITE_URL ?? "https://chatfreeai.com",
-            "X-Title": "Chat Free AI",
-          }),
+      "HTTP-Referer": process.env.SITE_URL ?? "https://chatfreeai.com",
+      "X-Title": "Chat Free AI",
     },
     body: JSON.stringify({
-      model: upstreamModel,
+      model: model.openrouter,
       // A system instruction only exists when the user turned on skills or is
       // inside a project — otherwise the model behaves exactly as before.
-      messages: systemPrompt ? [{ role: "system", content: systemPrompt }, ...messages] : messages,
+      messages: systemPrompt
+        ? [{ role: "system", content: systemPrompt }, ...messages]
+        : messages,
       stream: true,
-      max_tokens: wantsResearch ? Math.max(limits.maxOutputTokens, 2000) : limits.maxOutputTokens,
-      // OpenRouter reports usage via `usage: {include}`; the OpenAI protocol
-      // uses stream_options. Sending the wrong one costs the token counts the
-      // margin oracle settles against.
-      ...(useDirect ? { stream_options: { include_usage: true } } : { usage: { include: true } }),
+      max_tokens: wantsResearch
+        ? Math.max(limits.maxOutputTokens, 2000)
+        : limits.maxOutputTokens,
+      // OpenRouter reports usage here; without it the margin oracle has no
+      // token counts to settle against.
+      usage: { include: true },
       // OpenRouter's web plugin (Exa). max_results drives the cost, so research
       // asks for more only because the user spent a research run to get it.
       ...(wantsSearch
@@ -333,46 +347,16 @@ export async function POST(req: NextRequest) {
     signal: req.signal,
   });
 
-  let active = upstream;
-
-  if (useDirect || useAnthropic || useGemini) {
-    if (active.ok && active.body) {
-      recordProviderSuccess(route.provider!);
-    } else {
-      const detail = await active.text().catch(() => "");
-      recordProviderFailure(route.provider!, `HTTP ${active.status} ${detail.slice(0, 120)}`);
-
-      // Retry through OpenRouter — but only here, before a single token has
-      // been streamed. Once output has started, a retry would bill the user
-      // for both attempts and replay the answer from the beginning, so a
-      // mid-stream failure is surfaced rather than papered over.
-      active = await fetch(
-        `${process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai"}/api/v1/chat/completions`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": process.env.SITE_URL ?? "https://chatfreeai.com",
-            "X-Title": "Chat Free AI",
-          },
-          body: JSON.stringify({
-            model: model.openrouter,
-            messages: systemPrompt ? [{ role: "system", content: systemPrompt }, ...messages] : messages,
-            stream: true,
-            max_tokens: wantsResearch ? Math.max(limits.maxOutputTokens, 2000) : limits.maxOutputTokens,
-            usage: { include: true },
-          }),
-          signal: req.signal,
-        },
-      );
-    }
-  }
+  const active = upstream;
 
   if (!active.ok || !active.body) {
     const detail = await active.text().catch(() => "");
     console.error("chat upstream error", active.status, detail.slice(0, 500));
-    return deny(502, "upstream_error", "The model provider returned an error. Please try again.");
+    return deny(
+      502,
+      "upstream_error",
+      "The model provider returned an error. Please try again.",
+    );
   }
 
   // --- stream through, settle credits at the end -------------------------
@@ -383,7 +367,11 @@ export async function POST(req: NextRequest) {
   const estimateTokens = (msgs: { role: string; content: unknown }[]) =>
     Math.ceil(
       msgs.reduce(
-        (n, m) => n + (typeof m.content === "string" ? m.content.length : JSON.stringify(m.content).length),
+        (n, m) =>
+          n +
+          (typeof m.content === "string"
+            ? m.content.length
+            : JSON.stringify(m.content).length),
         0,
       ) / 4,
     );
@@ -403,7 +391,11 @@ export async function POST(req: NextRequest) {
    * generations run essentially free.
    */
   const billedModel = model;
-  async function settle(promptTokens: number, completionTokens: number, estimated: boolean) {
+  async function settle(
+    promptTokens: number,
+    completionTokens: number,
+    estimated: boolean,
+  ) {
     if (settled) return;
     settled = true;
     const { weight, usd, source } = await effectiveWeight(
@@ -435,20 +427,8 @@ export async function POST(req: NextRequest) {
       // responses, and the original one has already been drained.
       //
       // Anthropic's stream is converted to OpenAI-shaped chunks first, so
-      // everything below parses one format. Note the check is on `active`:
-      // if the Anthropic call failed and fell back, the response in hand is
-      // OpenRouter's and must NOT be translated.
-      // `active === upstream` matters: if the direct call failed and fell
-      // back, the response in hand is OpenRouter's and must NOT be translated.
-      const reader = (
-        active !== upstream
-          ? active.body!
-          : useAnthropic
-            ? anthropicToOpenAIStream(active.body!)
-            : useGemini
-              ? geminiToOpenAIStream(active.body!)
-              : active.body!
-      ).getReader();
+      // One upstream, one wire format — nothing to translate.
+      const reader = active.body!.getReader();
       streamReader = reader;
       let buffer = "";
       let promptTokens = 0;
@@ -471,13 +451,16 @@ export async function POST(req: NextRequest) {
               const json = JSON.parse(payload);
               if (json.usage) {
                 promptTokens = json.usage.prompt_tokens ?? promptTokens;
-                completionTokens = json.usage.completion_tokens ?? completionTokens;
+                completionTokens =
+                  json.usage.completion_tokens ?? completionTokens;
                 seenPromptTokens = promptTokens;
               }
               const delta = json.choices?.[0]?.delta?.content;
               if (delta) {
                 streamedChars += delta.length;
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ delta })}\n\n`));
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({ delta })}\n\n`),
+                );
               }
             } catch {
               /* keep-alive or partial frame */
@@ -490,16 +473,24 @@ export async function POST(req: NextRequest) {
         const credits = await settle(promptTokens, completionTokens, false);
 
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ done: true, credits, resetsAt })}\n\n`),
+          encoder.encode(
+            `data: ${JSON.stringify({ done: true, credits, resetsAt })}\n\n`,
+          ),
         );
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
         // An abort is the user pressing Stop, not a failure — don't surface it
         // as an error, and don't lose the billing for what did stream.
-        const isAbort = err instanceof Error && (err.name === "AbortError" || /aborted/i.test(err.message));
+        const isAbort =
+          err instanceof Error &&
+          (err.name === "AbortError" || /aborted/i.test(err.message));
         if (!isAbort) {
           console.error("stream error", err);
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: "stream_failed" })}\n\n`));
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({ error: "stream_failed" })}\n\n`,
+            ),
+          );
         }
       } finally {
         // Charge for the partial answer. settle() is idempotent, so a normal
@@ -529,7 +520,11 @@ export async function POST(req: NextRequest) {
         /* already gone */
       }
       const estimatedCompletion = Math.ceil(streamedChars / 4);
-      await settle(seenPromptTokens || estimateTokens(messages), estimatedCompletion, true);
+      await settle(
+        seenPromptTokens || estimateTokens(messages),
+        estimatedCompletion,
+        true,
+      );
     },
   });
 
@@ -562,7 +557,9 @@ export async function GET(req: NextRequest) {
     tier: f.tier,
     label: f.label,
     turnstileSiteKey:
-      f.tier === "guest" && turnstileConfigured() ? process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY : null,
+      f.tier === "guest" && turnstileConfigured()
+        ? process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
+        : null,
     paid: f.paid,
     signedIn: Boolean(session.userId),
     webSearch: f.webSearch,

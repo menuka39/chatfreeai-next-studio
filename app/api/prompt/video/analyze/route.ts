@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { getSession, planFor } from "@/lib/session";
 import { charge, userMonthlyKey } from "@/lib/quota";
 import { effectiveCredits, type LimitId } from "@/lib/plan-limits";
-import { callGemini, geminiToOpenAIStream } from "@/lib/providers/gemini";
+import { callGemini, geminiToOpenAIStream, resolveGeminiModel } from "@/lib/providers/gemini";
 import { PROVIDERS } from "@/lib/providers";
 import { deletePublicAsset } from "@/lib/storage";
 import { normalizeSupabaseUrl } from "@/lib/supabase/url";
@@ -27,7 +27,29 @@ export const maxDuration = 300;
 
 const MONTH_TTL = 60 * 60 * 24 * 40;
 const RESERVE_CREDITS = 300_000;
-const MODEL_ID = "gemini-3-flash";
+
+/**
+ * Which model to analyse with, in order of preference.
+ *
+ * Google's real model names drift — a model ships as `-preview`, goes GA under
+ * a new number, and the old string starts returning 404. The resolver checks
+ * these against ListModels and takes the first that exists, so a rename
+ * downgrades this tool instead of breaking it.
+ *
+ * Flash tiers first: video is charged per second of footage, and the Pro
+ * models cost several times more for a job that is description, not reasoning.
+ */
+const MODEL_PREFERENCE = [
+  "gemini-3.6-flash",
+  "gemini-3-flash",
+  "gemini-3.5-flash",
+  "gemini-3.1-flash",
+  "gemini-3.1-pro",
+  "gemini-2.5-flash",
+];
+
+/** Catalogue entry used only for the credit weight, not for the API name. */
+const PRICING_MODEL_ID = "gemini-36-flash";
 
 /**
  * The analysis brief, kept from the source tool.
@@ -81,8 +103,14 @@ export async function POST(req: NextRequest) {
   if (!base) return deny(503, "not_configured", "Storage isn't configured.");
   const fileUri = `${base}/storage/v1/object/public/public-assets/${path}`;
 
-  const model = modelById(MODEL_ID);
+  const model = modelById(PRICING_MODEL_ID);
   if (!model) return deny(503, "not_configured", "The analysis model isn't available.");
+
+  const geminiModel = await resolveGeminiModel(PROVIDERS.gemini.baseUrl, apiKey, MODEL_PREFERENCE);
+  if (!geminiModel) {
+    console.error("[video-to-prompt] no usable Gemini model; tried", MODEL_PREFERENCE.join(", "));
+    return deny(503, "not_configured", "The analysis model isn't available right now.");
+  }
 
   const key = userMonthlyKey(session.userId, session.periodStart);
   const limit = await effectiveCredits(session.packageId! as LimitId);
@@ -108,7 +136,7 @@ export async function POST(req: NextRequest) {
     upstream = await callGemini({
       baseUrl: PROVIDERS.gemini.baseUrl,
       apiKey,
-      model: model.directModel ?? MODEL_ID,
+      model: geminiModel,
       system: SYSTEM,
       messages: [
         {
@@ -128,7 +156,7 @@ export async function POST(req: NextRequest) {
 
   if (!upstream.ok || !upstream.body) {
     const detail = await upstream.text().catch(() => "");
-    console.error("[video-to-prompt] gemini error", upstream.status, detail.slice(0, 500));
+    console.error("[video-to-prompt] gemini error", upstream.status, geminiModel, detail.slice(0, 500));
     await release();
     // A URL Gemini can't fetch or won't accept is the most likely failure here,
     // and it is worth saying so rather than blaming the model.
