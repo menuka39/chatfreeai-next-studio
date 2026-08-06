@@ -108,20 +108,78 @@ const SYSTEM_SINGLE = [
  * hence the insistence on it, and on the delimiter being unique enough that a
  * prompt body can't accidentally contain one.
  */
-function systemScenes(sceneSeconds: number, sceneCount: number, duration: number) {
+/** mm:ss for a whole number of seconds. */
+function stamp(total: number) {
+  const t = Math.round(total);
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+}
+
+export interface ScenePlan {
+  n: number;
+  start: number;
+  end: number;
+  header: string;
+}
+
+/**
+ * Work out the exact cut points, here rather than in the model.
+ *
+ * Asking for scenes "of about N seconds" and letting the model place the
+ * boundaries produced exactly what you would expect: it drifted, and a run
+ * asked for 8s came back as a mix of 6s, 10s and 15s. Length is arithmetic —
+ * the model has no business deciding it. So the boundaries are computed and
+ * handed over as fixed headers, and the model's only job is to describe what
+ * happens inside each window.
+ *
+ * The tail gets special handling. Dividing 47 seconds into 15s scenes leaves 2
+ * seconds over, and no generator will render a 2-second clip — the floor is
+ * about 3. So a short remainder is folded into the previous scene where that
+ * stays under the 15s ceiling, and otherwise the last scene's start is pulled
+ * back to give it a renderable length. That costs a second of overlap, which
+ * you trim when joining; a clip you cannot generate costs the whole scene.
+ */
+const MIN_CLIP = 3;
+const MAX_CLIP = 15;
+
+export function planScenes(duration: number, sceneSeconds: number): ScenePlan[] {
+  const out: ScenePlan[] = [];
+  for (let start = 0; start < duration; start += sceneSeconds) {
+    const end = Math.min(start + sceneSeconds, duration);
+    out.push({ n: out.length + 1, start, end, header: "" });
+    if (end >= duration) break;
+  }
+
+  const last = out[out.length - 1];
+  if (last && out.length > 1 && last.end - last.start < MIN_CLIP) {
+    const prev = out[out.length - 2];
+    if (last.end - prev.start <= MAX_CLIP) {
+      // short enough to merge — one scene fewer, still renderable
+      prev.end = last.end;
+      out.pop();
+    } else {
+      // can't merge without exceeding the ceiling, so overlap backwards
+      last.start = Math.max(0, last.end - MIN_CLIP);
+    }
+    out.forEach((sc, i) => (sc.n = i + 1));
+  }
+  for (const sc of out) {
+    sc.header = `### SCENE ${sc.n} | ${stamp(sc.start)} - ${stamp(sc.end)} | ${Math.round(sc.end - sc.start)}s`;
+  }
+  return out;
+}
+
+function systemScenes(plan: ScenePlan[], duration: number) {
   return [
     "You are an expert AI video-prompt engineer. You are given a video.",
-    `Watch it and break it into exactly ${sceneCount} consecutive scenes of about ${sceneSeconds} seconds each, in order, together covering the whole ${Math.round(duration)} seconds with no gaps and no overlaps.`,
-    "Where a real shot change falls near a boundary, move the boundary to it — but keep every scene close to the target length and keep the total covering the whole video.",
-    "For each scene write a self-contained text-to-video prompt that could be generated on its own. Repeat the subject's appearance, wardrobe, setting, lighting and colour grade in EVERY scene — each is generated separately with no memory of the others, so anything you leave out will change between clips. Never write 'continues', 'the same as before', or 'as established'.",
+    `The video is ${Math.round(duration)} seconds long. It has already been divided into ${plan.length} scenes for you. Do not choose your own boundaries and do not change these ones.`,
+    "Write one self-contained text-to-video prompt for each scene, describing only what happens between that scene's start and end timestamps.",
+    "Each prompt must stand alone: it is generated separately with no memory of the others, so repeat the subject's appearance, wardrobe, setting, lighting and colour grade in EVERY scene. Never write 'continues', 'the same as before', or 'as established'.",
     "Keep each prompt to roughly 60-90 words of flowing prose.",
     COVERAGE,
     SAFETY,
-    "Format the reply as, for each scene and nothing else:",
-    "### SCENE <n> | <start m:ss> - <end m:ss> | <duration>s",
-    "<the prompt as flowing prose on the following lines>",
-    "",
-    "No other headings, no preamble, no summary at the end, no markdown besides those ### lines, and never wrap a prompt in quotation marks.",
+    "Reply with exactly these header lines, in this order, each followed by its prompt on the lines beneath it:",
+    plan.map((sc) => sc.header).join("\n"),
+    "Copy each header EXACTLY as written above — same numbers, same timestamps, same durations. No preamble, no summary, no other markdown, and never wrap a prompt in quotation marks.",
   ].join("\n");
 }
 
@@ -205,7 +263,8 @@ export async function POST(req: NextRequest) {
     ? (body.sceneSeconds as number)
     : 0;
   const duration = Math.min(3600, Math.max(0, Number(body.duration) || 0));
-  const sceneCount = sceneSeconds && duration ? Math.min(MAX_SCENES, Math.ceil(duration / sceneSeconds)) : 0;
+  const scenePlan = sceneSeconds && duration ? planScenes(duration, sceneSeconds).slice(0, MAX_SCENES) : [];
+  const sceneCount = scenePlan.length;
   const scenes = sceneCount > 1;
 
   // Each scene runs 60-90 words. Buying tokens for a single prompt would cut
@@ -239,7 +298,7 @@ export async function POST(req: NextRequest) {
         baseUrl: PROVIDERS.gemini.baseUrl,
         apiKey,
         model: candidate,
-        system: scenes ? systemScenes(sceneSeconds, sceneCount, duration) : SYSTEM_SINGLE,
+        system: scenes ? systemScenes(scenePlan, duration) : SYSTEM_SINGLE,
         messages: [
           {
             role: "user",
