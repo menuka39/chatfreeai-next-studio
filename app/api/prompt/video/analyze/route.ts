@@ -39,6 +39,20 @@ const RESERVE_CREDITS = 300_000;
  * Flash tiers first: video is charged per second of footage, and the Pro
  * models cost several times more for a job that is description, not reasoning.
  */
+/**
+ * Scene lengths the user can pick, all of which some model in
+ * lib/video-models.ts can actually produce in a single clip. Offering a length
+ * no generator supports would put a shot in the plan that can't be rendered.
+ */
+export const SCENE_LENGTHS = [5, 6, 8, 10, 15] as const;
+type SceneLength = (typeof SCENE_LENGTHS)[number];
+
+/**
+ * More than this and the output stops being useful: the model starts
+ * summarising to fit the token budget, and nobody hand-renders sixty clips.
+ */
+export const MAX_SCENES = 24;
+
 const MODEL_PREFERENCE = [
   "gemini-3.6-flash",
   "gemini-3.5-flash",
@@ -60,21 +74,56 @@ const USABLE_MODEL = (name: string, version: number) => version >= 3 && name.inc
 /** Catalogue entry used only for the credit weight, not for the API name. */
 const PRICING_MODEL_ID = "gemini-36-flash";
 
+/** Rules that hold whichever mode is asked for. */
+const SAFETY = [
+  "Describe people only by generic appearance and never by name; never name real individuals, brands, or copyrighted characters.",
+  "If the video shows something you cannot describe safely, describe the setting and cinematography only.",
+].join(" ");
+
+const COVERAGE =
+  "Cover the scene and setting, the main subject and its action, camera shot type and movement, " +
+  "lighting, colour grade, mood and pacing, and any notable visual style.";
+
 /**
- * The analysis brief, kept from the source tool.
- *
- * The point is a prompt someone can paste into a video generator, not a
- * description of the clip — so it has to read as an instruction, and it must
- * not name real people or copyrighted characters, which would make the output
- * unusable anyway.
+ * One prompt for the whole clip. Useful for a short video you want to
+ * reproduce as a single shot.
  */
-const SYSTEM = [
+const SYSTEM_SINGLE = [
   "You are an expert AI video-prompt engineer. You are given a video.",
   "Watch it and write ONE detailed text-to-video prompt that would recreate it in a modern video generator such as Veo, Kling or Sora.",
-  "Cover, in flowing prose rather than a list: the scene and setting, the main subject and its action, camera shot type and movement, lighting, colour grade, mood and pacing, and any notable visual style.",
-  "Describe people only by generic appearance and never by name; never name real individuals, brands, or copyrighted characters. If the video shows something you cannot describe safely, describe the setting and cinematography only.",
+  `${COVERAGE} Write it as flowing prose, not a list.`,
+  SAFETY,
   "Output plain text only: the finished prompt, nothing else. No markdown, no headings, no labels, no quotation marks around the result, and no commentary before or after.",
 ].join("\n");
+
+/**
+ * A shot list.
+ *
+ * Video models top out around 15 seconds, so a single prompt for a two-minute
+ * video describes something nobody can generate. Cutting it into shots that
+ * are each a legal clip length turns the output into a plan you can actually
+ * run: generate each scene, then join them.
+ *
+ * The scene header is parsed by the client, so its shape is load-bearing —
+ * hence the insistence on it, and on the delimiter being unique enough that a
+ * prompt body can't accidentally contain one.
+ */
+function systemScenes(sceneSeconds: number, sceneCount: number, duration: number) {
+  return [
+    "You are an expert AI video-prompt engineer. You are given a video.",
+    `Watch it and break it into exactly ${sceneCount} consecutive scenes of about ${sceneSeconds} seconds each, in order, together covering the whole ${Math.round(duration)} seconds with no gaps and no overlaps.`,
+    "Where a real shot change falls near a boundary, move the boundary to it — but keep every scene close to the target length and keep the total covering the whole video.",
+    "For each scene write a self-contained text-to-video prompt that could be generated on its own. Repeat the subject's appearance, wardrobe, setting, lighting and colour grade in EVERY scene — each is generated separately with no memory of the others, so anything you leave out will change between clips. Never write 'continues', 'the same as before', or 'as established'.",
+    "Keep each prompt to roughly 60-90 words of flowing prose.",
+    COVERAGE,
+    SAFETY,
+    "Format the reply as, for each scene and nothing else:",
+    "### SCENE <n> | <start m:ss> - <end m:ss> | <duration>s",
+    "<the prompt as flowing prose on the following lines>",
+    "",
+    "No other headings, no preamble, no summary at the end, no markdown besides those ### lines, and never wrap a prompt in quotation marks.",
+  ].join("\n");
+}
 
 function deny(status: number, code: string, message: string, extra: Record<string, unknown> = {}) {
   return Response.json({ error: code, message, ...extra }, { status });
@@ -98,7 +147,7 @@ export async function POST(req: NextRequest) {
     return deny(402, "plan_required", "Video to Prompt is included in every paid plan.");
   }
 
-  let body: { path?: string; mimeType?: string; notes?: string };
+  let body: { path?: string; mimeType?: string; notes?: string; sceneSeconds?: number; duration?: number };
   try {
     body = await req.json();
   } catch {
@@ -146,6 +195,29 @@ export async function POST(req: NextRequest) {
   const notes = (body.notes ?? "").trim().slice(0, 500);
 
   /**
+   * Scene mode: split the clip into shots a generator can actually produce.
+   *
+   * The duration comes from the browser, which read it off the file, so it is
+   * clamped rather than trusted — a bad value would otherwise decide how many
+   * scenes to ask for and how many output tokens to buy.
+   */
+  const sceneSeconds = SCENE_LENGTHS.includes(body.sceneSeconds as SceneLength)
+    ? (body.sceneSeconds as number)
+    : 0;
+  const duration = Math.min(3600, Math.max(0, Number(body.duration) || 0));
+  const sceneCount = sceneSeconds && duration ? Math.min(MAX_SCENES, Math.ceil(duration / sceneSeconds)) : 0;
+  const scenes = sceneCount > 1;
+
+  // Each scene runs 60-90 words. Buying tokens for a single prompt would cut
+  // the reply off partway through scene four — and a truncated reply is still
+  // charged for, so the budget has to match what was asked for.
+  const maxTokens = scenes ? Math.min(7000, 400 + sceneCount * 260) : 1500;
+
+  const instruction = scenes
+    ? `Break this video into ${sceneCount} scene prompts of about ${sceneSeconds} seconds each.`
+    : "Write the prompt for this video.";
+
+  /**
    * Try each candidate in turn, but only move on for a quota refusal.
    *
    * Gemini quotas are per project AND per model, and a newly released model
@@ -167,17 +239,16 @@ export async function POST(req: NextRequest) {
         baseUrl: PROVIDERS.gemini.baseUrl,
         apiKey,
         model: candidate,
-        system: SYSTEM,
+        system: scenes ? systemScenes(sceneSeconds, sceneCount, duration) : SYSTEM_SINGLE,
         messages: [
           {
             role: "user",
-            content: notes
-              ? `Write the prompt for this video. Extra direction from the user: ${notes}`
-              : "Write the prompt for this video.",
+            content: instruction + (notes ? ` Extra direction from the user: ${notes}` : ""),
           },
         ],
         attachments: [{ fileUri, mimeType: body.mimeType ?? "video/mp4" }],
-        maxTokens: 1500,
+        // a two-minute video can run to fifteen scenes
+        maxTokens,
       });
     } catch {
       await release();
@@ -277,7 +348,9 @@ export async function POST(req: NextRequest) {
         void deletePublicAsset(path);
 
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ done: true, credits, model: geminiModel })}\n\n`),
+          encoder.encode(
+            `data: ${JSON.stringify({ done: true, credits, model: geminiModel, scenes: sceneCount })}\n\n`,
+          ),
         );
         controller.close();
       }

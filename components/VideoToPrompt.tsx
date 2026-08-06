@@ -17,23 +17,78 @@ const ACCEPT = "video/mp4,video/quicktime,video/webm,video/x-msvideo,video/mpeg,
 const MAX_BYTES = 95 * 1024 * 1024;
 
 type Phase = "idle" | "uploading" | "analysing" | "done" | "error";
+type Mode = "single" | "scenes";
 
 const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)}MB`;
+
+interface Scene {
+  n: string;
+  range: string;
+  seconds: string;
+  prompt: string;
+}
+
+/**
+ * Split the streamed reply into scenes.
+ *
+ * Runs on every chunk, so it has to cope with a half-written header and a
+ * prompt that is still arriving — the last scene simply grows until the next
+ * header appears. Anything before the first header is preamble the model was
+ * asked not to write; if it writes some anyway, it is dropped rather than
+ * shown as a scene.
+ */
+function parseScenes(text: string): Scene[] {
+  const out: Scene[] = [];
+  const re = /^###\s*SCENE\s*(\S+)\s*\|\s*([^|\n]+?)\s*\|\s*([^\n]*)$/gim;
+  const heads: { i: number; len: number; m: RegExpExecArray }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) heads.push({ i: m.index, len: m[0].length, m });
+
+  heads.forEach((h, k) => {
+    const body = text.slice(h.i + h.len, k + 1 < heads.length ? heads[k + 1].i : undefined);
+    out.push({
+      n: h.m[1].replace(/[^\d]/g, "") || String(k + 1),
+      range: h.m[2].trim(),
+      seconds: h.m[3].trim(),
+      prompt: body.trim(),
+    });
+  });
+  return out;
+}
 
 export default function VideoToPrompt() {
   const [file, setFile] = useState<File | null>(null);
   const [notes, setNotes] = useState("");
+  const [mode, setMode] = useState<Mode>("scenes");
+  /** Seconds per scene. Every value here is renderable by some model. */
+  const [sceneSeconds, setSceneSeconds] = useState(8);
+  /** Read off the file itself — the server needs it to size the plan. */
+  const [duration, setDuration] = useState(0);
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState(0);
   const [output, setOutput] = useState("");
   const [message, setMessage] = useState("");
   const [needsPlan, setNeedsPlan] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
 
   const fileRef = useRef<HTMLInputElement>(null);
-  const outRef = useRef<HTMLPreElement>(null);
+  const outRef = useRef<HTMLElement>(null);
 
   const busy = phase === "uploading" || phase === "analysing";
+  const scenes = mode === "scenes" ? parseScenes(output) : [];
+  const totalSeconds = scenes.reduce((n, sc) => n + (parseInt(sc.seconds, 10) || 0), 0);
+  // How many clips the plan will come to. Capped server-side too: past a
+  // couple of dozen the model starts summarising to fit, and nobody is going
+  // to hand-render sixty clips anyway.
+  const MAX_SCENES = 24;
+  const plannedScenes = duration ? Math.min(MAX_SCENES, Math.ceil(duration / sceneSeconds)) : 0;
+  const cappedBy = duration ? Math.ceil(duration / sceneSeconds) > MAX_SCENES : false;
+
+  function copy(text: string, id: string) {
+    void navigator.clipboard?.writeText(text);
+    setCopied(id);
+    setTimeout(() => setCopied((c) => (c === id ? null : c)), 1400);
+  }
 
   function pick(f: File | null) {
     if (!f) return;
@@ -43,6 +98,17 @@ export default function VideoToPrompt() {
       return;
     }
     setFile(f);
+    setDuration(0);
+    // The browser can read the duration without uploading anything, which is
+    // what lets the scene count be shown before a byte is sent.
+    const probe = document.createElement("video");
+    probe.preload = "metadata";
+    probe.onloadedmetadata = () => {
+      if (Number.isFinite(probe.duration)) setDuration(probe.duration);
+      URL.revokeObjectURL(probe.src);
+    };
+    probe.onerror = () => URL.revokeObjectURL(probe.src);
+    probe.src = URL.createObjectURL(f);
     setPhase("idle");
     setMessage("");
     setOutput("");
@@ -94,7 +160,12 @@ export default function VideoToPrompt() {
       const res = await fetch("/api/prompt/video/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: signed.path, mimeType: signed.mimeType, notes }),
+        body: JSON.stringify({
+          path: signed.path,
+          mimeType: signed.mimeType,
+          notes,
+          ...(mode === "scenes" ? { sceneSeconds, duration } : {}),
+        }),
       });
 
       if (!res.ok || !res.body) {
@@ -176,6 +247,70 @@ export default function VideoToPrompt() {
         <p className="mt-3 text-xs text-white/40">MP4, MOV, WebM and similar · up to 95MB</p>
       </div>
 
+      {/* ---- what to produce ---- */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <span className="mb-2 block text-sm font-medium text-white/80">Output</span>
+          <div className="flex gap-2">
+            {(
+              [
+                ["scenes", "Scene by scene"],
+                ["single", "One prompt"],
+              ] as [Mode, string][]
+            ).map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                disabled={busy}
+                onClick={() => setMode(m)}
+                className={`flex-1 rounded-xl border px-3 py-2.5 text-sm transition disabled:opacity-40 ${
+                  mode === m
+                    ? "border-white/30 bg-white/10 font-medium text-white"
+                    : "border-white/12 text-white/60 hover:bg-white/5"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: mode === "scenes" ? undefined : "none" }}>
+          <label className="mb-2 block text-sm font-medium text-white/80">Seconds per scene</label>
+          <div className="flex gap-2">
+            {[5, 6, 8, 10, 15].map((n) => (
+              <button
+                key={n}
+                type="button"
+                disabled={busy}
+                onClick={() => setSceneSeconds(n)}
+                className={`flex-1 rounded-xl border px-2 py-2.5 text-sm transition disabled:opacity-40 ${
+                  sceneSeconds === n
+                    ? "border-white/30 bg-white/10 font-medium text-white"
+                    : "border-white/12 text-white/60 hover:bg-white/5"
+                }`}
+              >
+                {n}s
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <p className="-mt-1 text-xs text-white/40">
+        {mode !== "scenes" ? (
+          "One prompt describing the whole clip as a single shot."
+        ) : plannedScenes ? (
+          <>
+            {Math.round(duration)}s video → <span className="text-white/70">{plannedScenes} scenes</span> of{" "}
+            {sceneSeconds}s, each with its own self-contained prompt.
+            {cappedBy && " Capped at 24 — pick a longer scene length to cover the whole video."}
+          </>
+        ) : (
+          "Choose a video and this will show how many scenes the plan comes to."
+        )}
+      </p>
+
       {/* ---- optional direction ---- */}
       <div>
         <label htmlFor="v2p-notes" className="mb-2 block text-sm font-medium text-white/80">
@@ -187,7 +322,7 @@ export default function VideoToPrompt() {
           maxLength={500}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="e.g. focus on the camera movement, keep it under 60 words"
+          placeholder="e.g. keep every shot handheld, mention the rain in each scene"
           className="w-full rounded-xl border border-white/12 bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/30 focus:border-white/25 focus:outline-none"
         />
       </div>
@@ -202,7 +337,9 @@ export default function VideoToPrompt() {
           ? `Uploading… ${progress}%`
           : phase === "analysing"
             ? "Watching the video…"
-            : "Write the prompt"}
+            : mode === "scenes"
+              ? "Break into scenes"
+              : "Write the prompt"}
       </button>
 
       {phase === "uploading" && (
@@ -232,28 +369,61 @@ export default function VideoToPrompt() {
         <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
           <div className="mb-3 flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-white/45">
-              Your video prompt
+              {scenes.length
+                ? `${scenes.length} scenes · ${totalSeconds}s covered`
+                : "Your video prompt"}
             </span>
             {output && (
               <button
                 type="button"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(output);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1400);
-                }}
+                onClick={() => copy(scenes.length ? scenes.map((sc) => sc.prompt).join("\n\n") : output, "all")}
                 className="rounded-full border border-white/15 px-3 py-1 text-xs text-white/80 transition hover:bg-white/10"
               >
-                {copied ? "Copied" : "Copy"}
+                {copied === "all" ? "Copied" : scenes.length ? "Copy all" : "Copy"}
               </button>
             )}
           </div>
-          <pre
-            ref={outRef}
-            className="max-h-[420px] overflow-y-auto whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-white/85"
-          >
-            {output || "Reading the footage…"}
-          </pre>
+          {scenes.length ? (
+            /*
+             * One card per scene, because each is copied into a generator on
+             * its own — that is the whole point of splitting the video up. A
+             * single blob of text would have to be hand-separated first, and
+             * the timestamps are what tell you which clip goes where when you
+             * stitch them back together.
+             */
+            <div ref={outRef as React.RefObject<HTMLDivElement>} className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
+              {scenes.map((sc, i) => (
+                <div key={i} className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs font-semibold text-white/80">
+                      Scene {sc.n}
+                    </span>
+                    <span className="font-mono text-xs text-white/40">{sc.range}</span>
+                    {sc.seconds && (
+                      <span className="font-mono text-xs text-white/40">· {sc.seconds}</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => copy(sc.prompt, `s${i}`)}
+                      className="ml-auto rounded-full border border-white/15 px-3 py-1 text-xs text-white/80 transition hover:bg-white/10"
+                    >
+                      {copied === `s${i}` ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                  <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-white/85">
+                    {sc.prompt}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <pre
+              ref={outRef as React.RefObject<HTMLPreElement>}
+              className="max-h-[420px] overflow-y-auto whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-white/85"
+            >
+              {output || "Reading the footage…"}
+            </pre>
+          )}
         </div>
       )}
 
