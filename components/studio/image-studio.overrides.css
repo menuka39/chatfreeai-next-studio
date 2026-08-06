@@ -257,3 +257,21 @@
 		padding: 0 14px;
 	}
 }
+
+/* Per-tool local row: what this specific tool can do without a model. */
+.aig-tool-row {
+	align-items: center;
+	padding-bottom: 2px;
+}
+.aig-local-lead {
+	font-size: 12px;
+	font-weight: 700;
+	color: var(--aig-text, #f0f0f3);
+	white-space: nowrap;
+}
+.aig-local-note {
+	flex: 1 1 260px;
+	font-size: 11.5px;
+	line-height: 1.45;
+	color: var(--aig-muted, #9a9aa5);
+}

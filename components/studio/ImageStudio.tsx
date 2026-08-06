@@ -148,12 +148,17 @@ function editPromptFor(tool: EditTool, p: string, maskUsed: boolean, aspect: str
     return `Edit this image. Redraw / repaint the following: ${p}. Keep every other part of the image exactly the same.`;
   }
   if (tool === "erase") {
+    // Removal models respond to a description of what SHOULD be there, not to
+    // the word "remove" — asked to "remove the chair" they often draw another
+    // chair. Naming the replacement is the documented way to phrase it.
     if (maskUsed)
-      return `This image has some areas painted over with translucent red highlight. Completely remove whatever is underneath the red-highlighted areas and fill those areas naturally so they blend with the surroundings${p ? ` (${p})` : ""}. Remove the red highlight completely and keep every non-highlighted part of the image exactly the same.`;
-    return `Edit this image. Completely remove the following: ${p}. Fill the removed area naturally so it blends with the surroundings. Keep everything else exactly the same.`;
+      return `This image has some areas painted over with translucent red highlight. Replace everything underneath the red-highlighted areas with ${p || "whatever background naturally continues from the surroundings"}, matching the surrounding lighting, texture, perspective and colour so the join is invisible. Remove the red highlight completely and keep every non-highlighted part of the image exactly the same.`;
+    return `Edit this image. Where ${p} currently is, show ${"the background that naturally belongs there"} instead, matching the surrounding lighting, texture and perspective. Keep everything else exactly the same.`;
   }
   if (tool === "expand")
-    return `Outpaint this image: extend it beyond its current borders to a ${aspect} aspect ratio, continuing the scene naturally and seamlessly.${p ? ` In the extended areas: ${p}` : ""}`;
+    return maskUsed
+      ? `This image has a blurred border area painted over with translucent red highlight — that area is empty canvas to be filled in. Outpaint it: continue the scene outward from the real image, reading perspective, lighting and colour temperature from the boundary pixels so the join is invisible.${p ? ` In the new area: ${p}` : ""} Remove the red highlight completely and keep the original, non-highlighted part of the image exactly as it is.`
+      : `Outpaint this image: extend it beyond its current borders to a ${aspect} aspect ratio, continuing the scene naturally and seamlessly.${p ? ` In the extended areas: ${p}` : ""}`;
   return `Enhance this image: increase sharpness, detail and clarity, improve lighting and colors, and upscale the quality. Do not change the content, subject or composition.${p ? ` ${p}` : ""}`;
 }
 
@@ -463,6 +468,185 @@ export default function ImageStudio() {
     sourceImgRef.current = null;
     setEditorSrc(src);
     setEditorOpen(true);
+  }
+
+  /**
+   * Local operations, one per tool.
+   *
+   * What each tool means (the AI half follows the same definitions):
+   *  - Redraw  = inpainting: the masked area is regenerated from a prompt.
+   *  - Erase   = object removal: the masked area is replaced by plausible
+   *              background. Locally there is no content-aware fill, but
+   *              blurring or pixelating the same area covers the common case
+   *              of hiding a face or a number plate — instant and free.
+   *  - Expand  = outpainting: the canvas grows and the NEW area is the mask.
+   *              Expanding is genuinely a local step; the AI only fills what
+   *              expanding created. Doing it here first is also the documented
+   *              order — expand to set the canvas, then generate.
+   *  - Enhance = upscale/sharpen: more detail, same content. A local unsharp
+   *              mask does the "looks crisper" half without touching a model.
+   */
+
+  /** Blur or pixelate whatever the brush covered, then drop the mask. */
+  function localMaskEffect(mode: "blur" | "pixelate") {
+    const base = baseRef.current;
+    const mask = maskRef.current;
+    if (!base || !mask || !maskHasStrokes()) {
+      setStatus({ msg: "Paint over the area first.", type: "error" });
+      return;
+    }
+    const w = base.width;
+    const h = base.height;
+
+    // render the effect over the whole frame, then keep it only where painted
+    const fx = document.createElement("canvas");
+    fx.width = w;
+    fx.height = h;
+    const fctx = fx.getContext("2d")!;
+    if (mode === "blur") {
+      fctx.filter = `blur(${Math.max(6, Math.round(Math.min(w, h) / 45))}px)`;
+      fctx.drawImage(base, 0, 0);
+    } else {
+      const px = Math.max(8, Math.round(Math.min(w, h) / 40));
+      fctx.imageSmoothingEnabled = false;
+      fctx.drawImage(base, 0, 0, Math.ceil(w / px), Math.ceil(h / px));
+      fctx.drawImage(fx, 0, 0, Math.ceil(w / px), Math.ceil(h / px), 0, 0, w, h);
+    }
+    fctx.filter = "none";
+    fctx.globalCompositeOperation = "destination-in";
+    fctx.drawImage(mask, 0, 0);
+
+    const bctx = base.getContext("2d")!;
+    bctx.drawImage(fx, 0, 0);
+
+    // the pixels are changed for good, so the source becomes the result —
+    // otherwise the next slider move would redraw the original underneath
+    commitBase();
+    clearMask();
+  }
+
+  /** Sharpen the current frame with a 3x3 unsharp kernel. */
+  function localSharpen() {
+    const base = baseRef.current;
+    if (!base) return;
+    const w = base.width;
+    const h = base.height;
+    const ctx = base.getContext("2d")!;
+    let src: ImageData;
+    try {
+      src = ctx.getImageData(0, 0, w, h);
+    } catch {
+      setStatus({ msg: "That image can't be edited locally — it came from another origin.", type: "error" });
+      return;
+    }
+    const out = ctx.createImageData(w, h);
+    const k = [0, -0.6, 0, -0.6, 3.4, -0.6, 0, -0.6, 0]; // sums to 1: sharpen without brightening
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        for (let c = 0; c < 3; c++) {
+          let sum = 0;
+          for (let ky = -1; ky <= 1; ky++) {
+            for (let kx = -1; kx <= 1; kx++) {
+              const px = Math.min(w - 1, Math.max(0, x + kx));
+              const py = Math.min(h - 1, Math.max(0, y + ky));
+              sum += src.data[(py * w + px) * 4 + c] * k[(ky + 1) * 3 + (kx + 1)];
+            }
+          }
+          out.data[(y * w + x) * 4 + c] = Math.min(255, Math.max(0, sum));
+        }
+        out.data[(y * w + x) * 4 + 3] = 255;
+      }
+    }
+    ctx.putImageData(out, 0, 0);
+    commitBase();
+  }
+
+  /**
+   * Grow the canvas to a target ratio and mark the new area as the mask.
+   *
+   * The blank border IS the outpainting mask — that is what the model fills.
+   * Saving without generating leaves a padded image, which is a legitimate
+   * result on its own when all you needed was a different aspect ratio.
+   */
+  function localExpand(target: string) {
+    const base = baseRef.current;
+    const mask = maskRef.current;
+    if (!base || !mask) return;
+    const [rw, rh] = target.split(":").map(Number);
+    const w = base.width;
+    const h = base.height;
+    // never shrink: grow whichever side is short of the target
+    const cw = Math.round(Math.max(w, (h * rw) / rh));
+    const ch = Math.round(Math.max(h, (w * rh) / rw));
+    if (cw === w && ch === h) {
+      setStatus({ msg: "Already that shape.", type: "error" });
+      return;
+    }
+    const dx = Math.round((cw - w) / 2);
+    const dy = Math.round((ch - h) / 2);
+
+    const out = document.createElement("canvas");
+    out.width = cw;
+    out.height = ch;
+    const octx = out.getContext("2d")!;
+    // a blurred, stretched copy behind the padding gives the model colour and
+    // tone to continue from, and looks deliberate if it is never generated
+    octx.filter = "blur(28px)";
+    octx.drawImage(base, 0, 0, w, h, -cw * 0.05, -ch * 0.05, cw * 1.1, ch * 1.1);
+    octx.filter = "none";
+    octx.drawImage(base, dx, dy);
+
+    base.width = cw;
+    base.height = ch;
+    base.getContext("2d")!.drawImage(out, 0, 0);
+
+    mask.width = cw;
+    mask.height = ch;
+    const mctx = mask.getContext("2d")!;
+    mctx.clearRect(0, 0, cw, ch);
+    mctx.fillStyle = "rgba(255,60,60,0.55)";
+    if (dy > 0) {
+      mctx.fillRect(0, 0, cw, dy);
+      mctx.fillRect(0, dy + h, cw, ch - dy - h);
+    }
+    if (dx > 0) {
+      mctx.fillRect(0, 0, dx, ch);
+      mctx.fillRect(dx + w, 0, cw - dx - w, ch);
+    }
+    histRef.current = [mctx.getImageData(0, 0, cw, ch)];
+    setHistIdx(0);
+    setHistLen(1);
+
+    commitBase();
+    setStatus({ msg: `Canvas expanded to ${target}. Save it as-is, or describe the new edges and Apply with AI.` });
+  }
+
+  /** Make the current canvas the new source, so later redraws build on it. */
+  function commitBase() {
+    const base = baseRef.current;
+    if (!base) return;
+    let url: string;
+    try {
+      url = base.toDataURL("image/png");
+    } catch {
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      sourceImgRef.current = img;
+    };
+    img.src = url;
+    setAdjust({ rotate: 0, flipH: false, flipV: false, bright: 100, contrast: 100, saturate: 100 });
+  }
+
+  function clearMask() {
+    const mask = maskRef.current;
+    if (!mask) return;
+    const mctx = mask.getContext("2d")!;
+    mctx.clearRect(0, 0, mask.width, mask.height);
+    histRef.current = [mctx.getImageData(0, 0, mask.width, mask.height)];
+    setHistIdx(0);
+    setHistLen(1);
   }
 
   /** Paint the source onto the base canvas with the current adjustments. */
@@ -1690,6 +1874,56 @@ export default function ImageStudio() {
               />
             </div>
           </div>
+          {/* What this tool can do without a model at all. */}
+          <div className="aig-editor-toolsrow aig-local-row aig-tool-row">
+            {edTool?.tool === "erase" && (
+              <>
+                <span className="aig-local-lead">Cover it locally</span>
+                <button type="button" className="aig-local-btn" onClick={() => localMaskEffect("blur")}>
+                  Blur area
+                </button>
+                <button type="button" className="aig-local-btn" onClick={() => localMaskEffect("pixelate")}>
+                  Pixelate area
+                </button>
+                <span className="aig-local-note">
+                  Hides a face or a plate instantly. To have it actually removed and the background
+                  filled in, use AI below.
+                </span>
+              </>
+            )}
+            {edTool?.tool === "expand" && (
+              <>
+                <span className="aig-local-lead">Expand canvas to</span>
+                {["1:1", "16:9", "9:16", "4:3", "3:4"].map((r) => (
+                  <button key={r} type="button" className="aig-local-btn" onClick={() => localExpand(r)}>
+                    {r}
+                  </button>
+                ))}
+                <span className="aig-local-note">
+                  The new border becomes the area AI fills. Save it as-is for a padded image.
+                </span>
+              </>
+            )}
+            {edTool?.tool === "enhance" && (
+              <>
+                <span className="aig-local-lead">Sharpen locally</span>
+                <button type="button" className="aig-local-btn" onClick={localSharpen}>
+                  Sharpen
+                </button>
+                <span className="aig-local-note">
+                  Crisper edges, same pixels. For more actual detail — or a bigger image — use AI
+                  below.
+                </span>
+              </>
+            )}
+            {edTool?.tool === "redraw" && (
+              <span className="aig-local-note">
+                Painting over an area and describing what should be there needs AI — nothing local
+                can invent new content. The adjustments below still apply for free.
+              </span>
+            )}
+          </div>
+
           {/*
             Local edits: no model, no credits. Rotating a picture or lifting
             its brightness is arithmetic — paying an image model to do it would
