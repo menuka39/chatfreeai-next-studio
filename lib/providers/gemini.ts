@@ -257,21 +257,54 @@ export async function listGeminiModels(baseUrl: string, apiKey: string): Promise
   }
 }
 
+export async function resolveGeminiModels(
+  baseUrl: string,
+  apiKey: string,
+  preferred: string[],
+  /**
+   * Also accept anything this returns true for, after the named preferences,
+   * newest version first.
+   *
+   * Named preferences go stale the moment Google ships a new number — the list
+   * has to be edited and redeployed before the model can be used at all. A
+   * predicate picks up successors on its own, so a release adds a fallback
+   * instead of requiring one. It takes the parsed version precisely so a
+   * caller can say "3 or newer" rather than pattern-matching a major it has
+   * to guess in advance.
+   */
+  alsoMatch?: (name: string, version: number) => boolean,
+): Promise<string[]> {
+  const names = await listGeminiModels(baseUrl, apiKey);
+  // Nothing to check against (ListModels blocked or down) — trust the
+  // preferences as written rather than failing outright.
+  if (!names.length) return preferred;
+
+  const out: string[] = [];
+  for (const want of preferred) {
+    const hit = names.find((n) => n === want) ?? names.find((n) => n.startsWith(want));
+    if (hit && !out.includes(hit)) out.push(hit);
+  }
+
+  if (alsoMatch) {
+    const rest = names
+      .filter((n) => !out.includes(n) && alsoMatch(n, versionOf(n)))
+      // highest version first: "4" beats "3.6" beats "3.5"
+      .sort((a, b) => versionOf(b) - versionOf(a));
+    out.push(...rest);
+  }
+  return out;
+}
+
+/** The numeric version in a model id, e.g. "gemini-3.6-flash" -> 3.6. */
+function versionOf(name: string): number {
+  const m = /gemini-(\d+(?:\.\d+)?)/.exec(name);
+  return m ? parseFloat(m[1]) : 0;
+}
+
 export async function resolveGeminiModel(
   baseUrl: string,
   apiKey: string,
   preferred: string[],
 ): Promise<string | null> {
-  const names = await listGeminiModels(baseUrl, apiKey);
-  // Nothing to check against (ListModels blocked or down) — trust the first
-  // preference rather than failing outright.
-  if (!names.length) return preferred[0] ?? null;
-
-  for (const want of preferred) {
-    const exact = names.find((n) => n === want);
-    if (exact) return exact;
-    const prefixed = names.find((n) => n.startsWith(want));
-    if (prefixed) return prefixed;
-  }
-  return null;
+  return (await resolveGeminiModels(baseUrl, apiKey, preferred))[0] ?? null;
 }

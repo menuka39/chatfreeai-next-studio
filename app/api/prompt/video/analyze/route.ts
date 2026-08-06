@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { getSession, planFor } from "@/lib/session";
 import { charge, userMonthlyKey } from "@/lib/quota";
 import { effectiveCredits, type LimitId } from "@/lib/plan-limits";
-import { callGemini, geminiToOpenAIStream, resolveGeminiModel } from "@/lib/providers/gemini";
+import { callGemini, geminiToOpenAIStream, resolveGeminiModels } from "@/lib/providers/gemini";
 import { PROVIDERS } from "@/lib/providers";
 import { deletePublicAsset } from "@/lib/storage";
 import { normalizeSupabaseUrl } from "@/lib/supabase/url";
@@ -41,12 +41,21 @@ const RESERVE_CREDITS = 300_000;
  */
 const MODEL_PREFERENCE = [
   "gemini-3.6-flash",
-  "gemini-3-flash",
   "gemini-3.5-flash",
   "gemini-3.1-flash",
+  "gemini-3-flash",
   "gemini-3.1-pro",
-  "gemini-2.5-flash",
 ];
+
+/**
+ * Any Gemini 3 or newer, tried after the named preferences, newest first.
+ *
+ * Stated as a floor rather than a pattern so the next major is included the
+ * day it ships instead of the day someone edits this file. 2.x is excluded on
+ * purpose: those are retiring, and the 2.0 family never supported reading a
+ * file from an external URL — the mechanism this whole route depends on.
+ */
+const USABLE_MODEL = (name: string, version: number) => version >= 3 && name.includes("flash");
 
 /** Catalogue entry used only for the credit weight, not for the API name. */
 const PRICING_MODEL_ID = "gemini-36-flash";
@@ -106,8 +115,13 @@ export async function POST(req: NextRequest) {
   const model = modelById(PRICING_MODEL_ID);
   if (!model) return deny(503, "not_configured", "The analysis model isn't available.");
 
-  const geminiModel = await resolveGeminiModel(PROVIDERS.gemini.baseUrl, apiKey, MODEL_PREFERENCE);
-  if (!geminiModel) {
+  const candidates = await resolveGeminiModels(
+    PROVIDERS.gemini.baseUrl,
+    apiKey,
+    MODEL_PREFERENCE,
+    USABLE_MODEL,
+  );
+  if (!candidates.length) {
     console.error("[video-to-prompt] no usable Gemini model; tried", MODEL_PREFERENCE.join(", "));
     return deny(503, "not_configured", "The analysis model isn't available right now.");
   }
@@ -131,36 +145,82 @@ export async function POST(req: NextRequest) {
 
   const notes = (body.notes ?? "").trim().slice(0, 500);
 
-  let upstream: Response;
-  try {
-    upstream = await callGemini({
-      baseUrl: PROVIDERS.gemini.baseUrl,
-      apiKey,
-      model: geminiModel,
-      system: SYSTEM,
-      messages: [
-        {
-          role: "user",
-          content: notes
-            ? `Write the prompt for this video. Extra direction from the user: ${notes}`
-            : "Write the prompt for this video.",
-        },
-      ],
-      attachments: [{ fileUri, mimeType: body.mimeType ?? "video/mp4" }],
-      maxTokens: 1500,
-    });
-  } catch {
-    await release();
-    return deny(502, "upstream_error", "Could not reach the analysis model. Your credits were not charged.");
+  /**
+   * Try each candidate in turn, but only move on for a quota refusal.
+   *
+   * Gemini quotas are per project AND per model, and a newly released model
+   * often carries none at all on an unbilled project — the request fails with
+   * 429 while an older Flash of the same class would have answered. Every
+   * candidate here is a Flash tier, so falling back changes the bill by
+   * cents, not by a category; anything else (a bad URL, a safety refusal)
+   * would fail identically on the next model, so those stop immediately.
+   */
+  let upstream: Response | null = null;
+  let geminiModel = candidates[0];
+  let lastDetail = "";
+  let lastStatus = 0;
+
+  for (const candidate of candidates) {
+    let res: Response;
+    try {
+      res = await callGemini({
+        baseUrl: PROVIDERS.gemini.baseUrl,
+        apiKey,
+        model: candidate,
+        system: SYSTEM,
+        messages: [
+          {
+            role: "user",
+            content: notes
+              ? `Write the prompt for this video. Extra direction from the user: ${notes}`
+              : "Write the prompt for this video.",
+          },
+        ],
+        attachments: [{ fileUri, mimeType: body.mimeType ?? "video/mp4" }],
+        maxTokens: 1500,
+      });
+    } catch {
+      await release();
+      return deny(502, "upstream_error", "Could not reach the analysis model. Your credits were not charged.");
+    }
+
+    if (res.ok && res.body) {
+      upstream = res;
+      if (candidate !== candidates[0]) {
+        console.warn(`[video-to-prompt] answered by ${candidate} after falling back`);
+      }
+      geminiModel = candidate;
+      break;
+    }
+
+    lastStatus = res.status;
+    lastDetail = await res.text().catch(() => "");
+    console.error("[video-to-prompt] gemini error", res.status, candidate, lastDetail.slice(0, 400));
+    if (res.status !== 429) break;
+    console.warn(`[video-to-prompt] ${candidate} is out of quota — trying the next model`);
   }
 
-  if (!upstream.ok || !upstream.body) {
-    const detail = await upstream.text().catch(() => "");
-    console.error("[video-to-prompt] gemini error", upstream.status, geminiModel, detail.slice(0, 500));
+  if (!upstream) {
     await release();
-    // A URL Gemini can't fetch or won't accept is the most likely failure here,
+
+    if (lastStatus === 429) {
+      // Worth naming precisely: this is Google's quota on the project, not
+      // anything about the video or this app's own credit limits.
+      console.error(
+        "[video-to-prompt] every candidate model was rate limited. Gemini quotas are " +
+          "per Google Cloud project — check RPM/TPM/RPD in AI Studio, and note that a " +
+          "brand-new model can have zero free-tier quota until billing is enabled.",
+      );
+      return deny(
+        429,
+        "provider_quota",
+        "The video analyser is at its limit right now. Please try again in a few minutes — your credits were not charged.",
+      );
+    }
+
+    // A URL Gemini can't fetch or won't accept is the other likely failure,
     // and it is worth saying so rather than blaming the model.
-    const unreachable = /url_retrieval|unsafe|fetch/i.test(detail);
+    const unreachable = /url_retrieval|unsafe|fetch/i.test(lastDetail);
     return deny(
       502,
       "upstream_error",
@@ -172,7 +232,7 @@ export async function POST(req: NextRequest) {
 
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
-  const reader = geminiToOpenAIStream(upstream.body).getReader();
+  const reader = geminiToOpenAIStream(upstream.body!).getReader();
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -216,7 +276,9 @@ export async function POST(req: NextRequest) {
         // The clip only existed so Gemini could read it once.
         void deletePublicAsset(path);
 
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true, credits })}\n\n`));
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ done: true, credits, model: geminiModel })}\n\n`),
+        );
         controller.close();
       }
     },
