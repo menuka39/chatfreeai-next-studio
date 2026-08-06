@@ -174,6 +174,18 @@ function editableSrc(url: string, token?: string): string {
   return `/api/image/proxy?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`;
 }
 
+/**
+ * A fresh clip id and timestamp.
+ *
+ * Lives at module scope because the clock and the random source are impure:
+ * called from inside the component they would be flagged as render-phase work,
+ * and a re-render could genuinely change them mid-flight.
+ */
+function stampClip() {
+  const now = Date.now();
+  return { job_id: `${now}_${Math.floor(Math.random() * 1e6)}`, ts: now };
+}
+
 const fileToDataUrl = (f: File) =>
   new Promise<string>((resolve, reject) => {
     const r = new FileReader();
@@ -216,6 +228,20 @@ export default function ImageStudio() {
 
   /* mask editor */
   const [editorOpen, setEditorOpen] = useState(false);
+  /**
+   * The image the editor is working on, kept in state rather than drawn
+   * straight to the canvas.
+   *
+   * The editor is a portal that unmounts when it closes, so its canvases only
+   * exist after React commits. Drawing inside the image's onload raced that:
+   * a data URL decodes almost instantly, so on the SECOND open the draw ran
+   * against refs that were still null and the editor came up blank. Holding
+   * the source and drawing from an effect means the canvas is guaranteed to
+   * be there.
+   */
+  const [editorSrc, setEditorSrc] = useState<string | null>(null);
+  /** Non-destructive local edits, re-applied on every redraw. */
+  const [adjust, setAdjust] = useState({ rotate: 0, flipH: false, flipV: false, bright: 100, contrast: 100, saturate: 100 });
   const [srcMenu, setSrcMenu] = useState<{ tool: EditTool; label: string; ph: string } | null>(null);
   const [assetsOpen, setAssetsOpen] = useState(false);
   const [edTool, setEdTool] = useState<{ tool: EditTool; label: string; ph: string } | null>(null);
@@ -228,6 +254,7 @@ export default function ImageStudio() {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const maskRef = useRef<HTMLCanvasElement>(null);
   const histRef = useRef<ImageData[]>([]);
+  const sourceImgRef = useRef<HTMLImageElement | null>(null);
   const drawingRef = useRef(false);
   const editBarRef = useRef<HTMLButtonElement>(null);
   const editFileRef = useRef<HTMLInputElement>(null);
@@ -427,24 +454,82 @@ export default function ImageStudio() {
     });
   }
 
-  async function loadEditor(src: string, meta: { tool: EditTool; label: string; ph: string }) {
+  function loadEditor(src: string, meta: { tool: EditTool; label: string; ph: string }) {
     setSrcMenu(null);
     setAssetsOpen(false);
     setEdTool(meta);
     setEdPrompt("");
+    setAdjust({ rotate: 0, flipH: false, flipV: false, bright: 100, contrast: 100, saturate: 100 });
+    sourceImgRef.current = null;
+    setEditorSrc(src);
     setEditorOpen(true);
+  }
+
+  /** Paint the source onto the base canvas with the current adjustments. */
+  const redraw = useCallback(() => {
+    const img = sourceImgRef.current;
+    const base = baseRef.current;
+    const mask = maskRef.current;
+    if (!img || !base || !mask) return;
+
+    const max = 1024;
+    let w = img.naturalWidth || 1024;
+    let h = img.naturalHeight || 1024;
+    if (w > max || h > max) {
+      const r = Math.min(max / w, max / h);
+      w = Math.round(w * r);
+      h = Math.round(h * r);
+    }
+    // a quarter turn swaps the canvas's own dimensions
+    const turned = adjust.rotate % 180 !== 0;
+    const cw = turned ? h : w;
+    const ch = turned ? w : h;
+
+    const sizeChanged = base.width !== cw || base.height !== ch;
+    base.width = cw;
+    base.height = ch;
+
+    const ctx = base.getContext("2d")!;
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.save();
+    ctx.translate(cw / 2, ch / 2);
+    ctx.rotate((adjust.rotate * Math.PI) / 180);
+    ctx.scale(adjust.flipH ? -1 : 1, adjust.flipV ? -1 : 1);
+    ctx.filter = `brightness(${adjust.bright}%) contrast(${adjust.contrast}%) saturate(${adjust.saturate}%)`;
+    ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    ctx.restore();
+
+    // The mask is painted in canvas pixels, so a rotation or a resize would
+    // leave the strokes pointing at the wrong part of the picture. Clearing is
+    // the honest outcome — silently keeping a misaligned mask is worse.
+    if (sizeChanged || mask.width !== cw || mask.height !== ch) {
+      mask.width = cw;
+      mask.height = ch;
+      const mctx = mask.getContext("2d")!;
+      mctx.clearRect(0, 0, cw, ch);
+      histRef.current = [mctx.getImageData(0, 0, cw, ch)];
+      setHistIdx(0);
+      setHistLen(1);
+    }
+  }, [adjust]);
+
+  /* load the source once the editor (and its canvases) are actually mounted */
+  useEffect(() => {
+    if (!editorOpen || !editorSrc) return;
+    let alive = true;
 
     const img = new Image();
     /*
      * Only ask for CORS from a source that sends it — our proxy.
      *
      * On a raw provider URL this attribute turns a merely-tainted canvas into
-     * a load failure: the image never arrives and the editor opens on a blank
-     * canvas with nothing to say. Without it a legacy image at least appears
-     * and can be painted on, and the export is what reports the problem.
+     * a load failure: the image never arrives and the editor opens blank.
+     * Without it a legacy image at least appears and can be painted on, and
+     * the export is what reports the problem.
      */
-    if (src.startsWith("/api/") || src.startsWith("data:")) img.crossOrigin = "anonymous";
+    if (editorSrc.startsWith("/api/") || editorSrc.startsWith("data:")) img.crossOrigin = "anonymous";
     img.onerror = () => {
+      if (!alive) return;
       setEditorOpen(false);
       setStatus({
         msg: "Couldn't open that image for editing — it may have expired. Generate it again and retry.",
@@ -452,30 +537,25 @@ export default function ImageStudio() {
       });
     };
     img.onload = () => {
-      const base = baseRef.current;
-      const mask = maskRef.current;
-      if (!base || !mask) return;
-      const max = 1024;
-      let w = img.naturalWidth || 1024;
-      let h = img.naturalHeight || 1024;
-      if (w > max || h > max) {
-        const r = Math.min(max / w, max / h);
-        w = Math.round(w * r);
-        h = Math.round(h * r);
-      }
-      base.width = w;
-      base.height = h;
-      mask.width = w;
-      mask.height = h;
-      base.getContext("2d")!.drawImage(img, 0, 0, w, h);
-      const mctx = mask.getContext("2d")!;
-      mctx.clearRect(0, 0, w, h);
-      histRef.current = [mctx.getImageData(0, 0, w, h)];
-      setHistIdx(0);
-      setHistLen(1);
+      if (!alive) return;
+      sourceImgRef.current = img;
+      redraw();
     };
-    img.src = src;
-  }
+    img.src = editorSrc;
+
+    return () => {
+      alive = false;
+    };
+    // redraw is intentionally omitted: it changes with every slider move, and
+    // re-running this would refetch the image on each one. Adjustments are
+    // applied by the effect below instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorOpen, editorSrc]);
+
+  /* re-apply adjustments without reloading the image */
+  useEffect(() => {
+    if (editorOpen && sourceImgRef.current) redraw();
+  }, [adjust, editorOpen, redraw]);
 
   function pushHist() {
     const mask = maskRef.current;
@@ -518,31 +598,61 @@ export default function ImageStudio() {
     return false;
   }
 
-  function applyEditor() {
+  /** Flatten the base canvas (adjustments already baked in) to a data URL. */
+  function exportEdited(withMask: boolean): string | null {
     const base = baseRef.current;
     const mask = maskRef.current;
-    if (!base || !mask || !edTool) return;
-    const used = maskHasStrokes();
+    if (!base || !mask) return null;
     const out = document.createElement("canvas");
     out.width = base.width;
     out.height = base.height;
     const ctx = out.getContext("2d")!;
     ctx.drawImage(base, 0, 0);
-    if (used) ctx.drawImage(mask, 0, 0);
-    // encode once — a 1024px JPEG is not cheap to produce twice
-    let image: string;
+    if (withMask) ctx.drawImage(mask, 0, 0);
     try {
-      image = out.toDataURL("image/jpeg", 0.87);
+      return out.toDataURL("image/jpeg", 0.92);
     } catch {
-      // SecurityError: the source image was drawn from an origin that sent no
-      // CORS headers, so the browser refuses to let us read the pixels back.
+      // SecurityError: the source came from an origin that sent no CORS
+      // headers, so the browser refuses to let us read the pixels back.
       setEditorOpen(false);
       setStatus({
-        msg: "That image can't be edited — it was made before editing was supported. Generate a new one and it will work.",
+        msg: "That image can't be exported — it was made before editing was supported. Generate a new one and it will work.",
         type: "error",
       });
-      return;
+      return null;
     }
+  }
+
+  /**
+   * Keep the local edits and stop there — no model, no credits.
+   *
+   * Rotating a picture or lifting its brightness is arithmetic, and sending it
+   * to an image model to do that would cost money and change everything else
+   * in the frame as a side effect. The result joins the project like any other
+   * image, so it can be downloaded, extended or edited again.
+   */
+  function saveLocal() {
+    const image = exportEdited(false);
+    if (!image) return;
+    const clip: StudioClip = {
+      ...stampClip(),
+      url: image,
+      model: "local-edit",
+      aspect: shown?.aspect ?? aspect,
+      size: "",
+      prompt: `[Edited] ${lastPrompt || "uploaded image"}`,
+    };
+    push(clip, currentId);
+    showImage(image, { model: "local-edit", aspect: shown?.aspect ?? aspect, size: "" });
+    setEditorOpen(false);
+    setStatus({ msg: "Saved to your project — no credits used.", type: "success" });
+  }
+
+  function applyEditor() {
+    if (!edTool) return;
+    const used = maskHasStrokes();
+    const image = exportEdited(used);
+    if (!image) return;
     const edit = { tool: edTool.tool, label: edTool.label, image, maskUsed: used };
     setPendingEdit(edit);
     setPrompt(edPrompt);
@@ -1580,6 +1690,50 @@ export default function ImageStudio() {
               />
             </div>
           </div>
+          {/*
+            Local edits: no model, no credits. Rotating a picture or lifting
+            its brightness is arithmetic — paying an image model to do it would
+            also redraw everything else in the frame as a side effect.
+          */}
+          <div className="aig-editor-toolsrow aig-local-row">
+            <div className="aig-editor-toolgroup">
+              <button type="button" className="aig-local-btn" title="Rotate left"
+                onClick={() => setAdjust((a) => ({ ...a, rotate: (a.rotate + 270) % 360 }))}>↺</button>
+              <button type="button" className="aig-local-btn" title="Rotate right"
+                onClick={() => setAdjust((a) => ({ ...a, rotate: (a.rotate + 90) % 360 }))}>↻</button>
+              <button type="button" className={`aig-local-btn${adjust.flipH ? " is-on" : ""}`} title="Flip horizontally"
+                onClick={() => setAdjust((a) => ({ ...a, flipH: !a.flipH }))}>⇄</button>
+              <button type="button" className={`aig-local-btn${adjust.flipV ? " is-on" : ""}`} title="Flip vertically"
+                onClick={() => setAdjust((a) => ({ ...a, flipV: !a.flipV }))}>⇅</button>
+            </div>
+            <div className="aig-editor-toolgroup aig-local-sliders">
+              {([
+                ["bright", "Brightness"],
+                ["contrast", "Contrast"],
+                ["saturate", "Saturation"],
+              ] as const).map(([k, label]) => (
+                <label key={k} className="aig-local-slider" title={`${label} ${adjust[k]}%`}>
+                  <span>{label}</span>
+                  <input
+                    type="range"
+                    min={20}
+                    max={200}
+                    value={adjust[k]}
+                    onChange={(e) => setAdjust((a) => ({ ...a, [k]: Number(e.target.value) }))}
+                  />
+                </label>
+              ))}
+              <button
+                type="button"
+                className="aig-local-btn"
+                title="Reset adjustments"
+                onClick={() => setAdjust({ rotate: 0, flipH: false, flipV: false, bright: 100, contrast: 100, saturate: 100 })}
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
           <div className="aig-editor-toolsrow">
             <div className="aig-editor-toolgroup aig-editor-brushgrp">
               <span className="aig-editor-brush-ic">🖌</span>
@@ -1618,7 +1772,9 @@ export default function ImageStudio() {
             </div>
           </div>
           <p className="aig-editor-hint">
-            Paint over the areas you want to change — or leave it blank and just describe the edit.
+            Rotate, flip and adjust for free — <strong>Save edit</strong> keeps those and costs
+            nothing. For anything a slider can&apos;t do, paint over the areas you want changed (or
+            leave it blank), describe it, and <strong>Apply with AI</strong>.
           </p>
           <div className="aig-editor-bottom">
             <input
@@ -1629,8 +1785,11 @@ export default function ImageStudio() {
               value={edPrompt}
               onChange={(e) => setEdPrompt(e.target.value)}
             />
+            <button type="button" className="aig-editor-save" onClick={saveLocal}>
+              ⤓ Save edit
+            </button>
             <button type="button" className="aig-editor-apply" onClick={applyEditor}>
-              <span className="aig-gen-star">✦</span> Apply
+              <span className="aig-gen-star">✦</span> Apply with AI
             </button>
           </div>
             </div>,

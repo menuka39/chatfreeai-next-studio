@@ -176,3 +176,84 @@
 		font-size: 16px;
 	}
 }
+
+/* ---------------------------------------------------------------------------
+   Editor — local adjustments
+   Rotate, flip and the three sliders never reach a model. They sit above the
+   brush row so the free operations are the first thing offered, and the paid
+   one is a deliberate second step.
+   --------------------------------------------------------------------------- */
+.aig-local-row {
+	flex-wrap: wrap;
+	gap: 10px 18px;
+}
+.aig-local-btn {
+	min-width: 38px;
+	height: 34px;
+	padding: 0 11px;
+	border-radius: 10px;
+	border: 1px solid var(--aig-border, #2a2a31);
+	background: var(--aig-surface-2, #202026);
+	color: var(--aig-text, #f0f0f3);
+	font-family: var(--aig-font, system-ui);
+	font-size: 14px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: 0.13s;
+}
+.aig-local-btn:hover {
+	border-color: var(--aig-border-2, #37373f);
+}
+.aig-local-btn.is-on {
+	border-color: var(--aig-accent, #ff5c1a);
+	color: var(--aig-accent, #ff5c1a);
+}
+.aig-local-sliders {
+	flex: 1 1 320px;
+	gap: 14px;
+}
+.aig-local-slider {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	font-size: 11.5px;
+	font-weight: 600;
+	color: var(--aig-muted, #9a9aa5);
+	white-space: nowrap;
+}
+.aig-local-slider input {
+	width: 82px;
+	accent-color: var(--aig-accent, #ff5c1a);
+}
+
+/* Free action reads as secondary next to the paid one, but stays a real
+   button rather than a link — it is the one most people want. */
+.aig-editor-save {
+	border: 1px solid var(--aig-border-2, #37373f);
+	background: transparent;
+	color: var(--aig-text, #f0f0f3);
+	border-radius: 999px;
+	padding: 0 18px;
+	height: 46px;
+	font-family: var(--aig-font, system-ui);
+	font-size: 14px;
+	font-weight: 700;
+	cursor: pointer;
+	white-space: nowrap;
+	transition: 0.13s;
+}
+.aig-editor-save:hover {
+	background: var(--aig-surface-2, #202026);
+}
+
+@media (max-width: 560px) {
+	.aig-local-slider span {
+		display: none;
+	}
+	.aig-local-slider input {
+		width: 66px;
+	}
+	.aig-editor-save {
+		padding: 0 14px;
+	}
+}
