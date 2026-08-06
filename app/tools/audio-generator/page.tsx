@@ -4,7 +4,8 @@ import SpeechStudio from "@/components/studio/SpeechStudio";
 import { audioModels } from "@/lib/audio-models";
 
 export const metadata: Metadata = {
-  title: "AI Voice Generator — Chat Free AI",
+  alternates: { canonical: "/tools/audio-generator" },
+  title: "AI Voice Generator",
   description:
     "Turn text into natural speech with Grok Voice, Gemini 3.1 Flash TTS, GPT-4o Mini TTS and Kokoro — included in every paid plan, charged from your monthly credits.",
 };

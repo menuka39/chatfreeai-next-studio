@@ -12,7 +12,8 @@ import SignalBars from "@/components/SignalBars";
 import { resumeTemplates } from "@/lib/resume-templates";
 
 export const metadata: Metadata = {
-  title: "Pricing — Chat Free AI",
+  alternates: { canonical: "/pricing" },
+  title: "Pricing",
   description:
     "All 8 core AI models are free for everyone, no account needed. Upgrade for more credits and the newest premium models.",
 };

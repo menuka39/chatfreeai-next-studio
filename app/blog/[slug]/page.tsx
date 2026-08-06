@@ -25,11 +25,17 @@ export async function generateMetadata({
   const post = await getPublishedPost(slug);
   if (!post) return {};
   return {
-    title: `${post.title} — Chat Free AI`,
+    title: post.title,
     description: post.excerpt,
-    openGraph: post.coverImageUrl
-      ? { title: post.title, description: post.excerpt, images: [{ url: post.coverImageUrl }] }
-      : undefined,
+    alternates: { canonical: `/blog/${slug}` },
+    openGraph: {
+      type: "article",
+      title: post.title,
+      description: post.excerpt,
+      url: `/blog/${slug}`,
+      publishedTime: new Date(post.date).toISOString(),
+      ...(post.coverImageUrl ? { images: [{ url: post.coverImageUrl }] } : {}),
+    },
   };
 }
 

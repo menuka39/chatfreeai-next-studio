@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import ResumeBuilder from "@/components/resume/ResumeBuilder";
 
 export const metadata: Metadata = {
-  title: "Resume Builder — Chat Free AI",
+  title: "Resume Builder",
   description:
     "Structured resume editor with live preview, 40 templates, ATS readiness score and AI help for every field.",
 };

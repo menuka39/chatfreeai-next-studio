@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { isAdminPageRequest } from "@/lib/admin";
 
-export const metadata: Metadata = { title: "Admin — Chat Free AI", robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: "Admin", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
 
 const NAV = [

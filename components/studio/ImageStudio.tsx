@@ -121,6 +121,18 @@ function ideaTitle(prompt: string) {
   return out.replace(/^./, (c) => c.toUpperCase());
 }
 
+/** How many idea cards sit under the viewer. Two, large, rather than a wall. */
+const INSPIRE_COUNT = 2;
+
+/**
+ * Read once when the module loads, not during render.
+ *
+ * The clock is impure: calling it while rendering would let the pair change on
+ * any incidental re-render, shuffling the cards under the cursor. Captured
+ * here it is a constant for the life of the page, and still moves day to day.
+ */
+const TODAY = Math.floor(Date.now() / 86_400_000);
+
 const IDEAS: { title: string; prompt: string }[] = [
   ...imageIdeas.map((p) => ({ title: ideaTitle(p), prompt: p })),
   ...imagePresets.flatMap((g) =>
@@ -143,6 +155,23 @@ function editPromptFor(tool: EditTool, p: string, maskUsed: boolean, aspect: str
   if (tool === "expand")
     return `Outpaint this image: extend it beyond its current borders to a ${aspect} aspect ratio, continuing the scene naturally and seamlessly.${p ? ` In the extended areas: ${p}` : ""}`;
   return `Enhance this image: increase sharpness, detail and clarity, improve lighting and colors, and upscale the quality. Do not change the content, subject or composition.${p ? ` ${p}` : ""}`;
+}
+
+/**
+ * A URL a canvas can actually read.
+ *
+ * Data URLs are same-origin by definition. Everything else is a provider CDN
+ * that sends no CORS headers, so it goes through our proxy — otherwise the
+ * canvas is tainted and the finished edit can never be exported.
+ *
+ * Images generated before signing existed have no token. Those are returned
+ * as-is and will work only if the provider happens to send CORS; the editor
+ * says so plainly rather than failing silently.
+ */
+function editableSrc(url: string, token?: string): string {
+  if (url.startsWith("data:") || url.startsWith("blob:")) return url;
+  if (!token) return url;
+  return `/api/image/proxy?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`;
 }
 
 const fileToDataUrl = (f: File) =>
@@ -171,7 +200,13 @@ export default function ImageStudio() {
   const [busy, setBusy] = useState(false);
   const [progTxt, setProgTxt] = useState("Generating…");
   const [status, setStatus] = useState<{ msg: string; type?: "error" | "success" } | null>(null);
-  const [shown, setShown] = useState<{ url: string; model: string; aspect: string; size: string } | null>(null);
+  const [shown, setShown] = useState<{
+    url: string;
+    token?: string;
+    model: string;
+    aspect: string;
+    size: string;
+  } | null>(null);
   const [lastPrompt, setLastPrompt] = useState("");
   const [addMode, setAddMode] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -361,7 +396,7 @@ export default function ImageStudio() {
   /* ---------------- mask editor ---------------- */
   const currentImageDataUrl = useCallback((): string | null => {
     if (!shown?.url) return null;
-    return shown.url;
+    return editableSrc(shown.url, shown.token);
   }, [shown]);
 
   function openSrcMenu(t: (typeof EDIT_TOOLS)[number], from: DOMRect) {
@@ -384,7 +419,22 @@ export default function ImageStudio() {
     setEditorOpen(true);
 
     const img = new Image();
-    img.crossOrigin = "anonymous";
+    /*
+     * Only ask for CORS from a source that sends it — our proxy.
+     *
+     * On a raw provider URL this attribute turns a merely-tainted canvas into
+     * a load failure: the image never arrives and the editor opens on a blank
+     * canvas with nothing to say. Without it a legacy image at least appears
+     * and can be painted on, and the export is what reports the problem.
+     */
+    if (src.startsWith("/api/") || src.startsWith("data:")) img.crossOrigin = "anonymous";
+    img.onerror = () => {
+      setEditorOpen(false);
+      setStatus({
+        msg: "Couldn't open that image for editing — it may have expired. Generate it again and retry.",
+        type: "error",
+      });
+    };
     img.onload = () => {
       const base = baseRef.current;
       const mask = maskRef.current;
@@ -464,12 +514,20 @@ export default function ImageStudio() {
     ctx.drawImage(base, 0, 0);
     if (used) ctx.drawImage(mask, 0, 0);
     // encode once — a 1024px JPEG is not cheap to produce twice
-    const edit = {
-      tool: edTool.tool,
-      label: edTool.label,
-      image: out.toDataURL("image/jpeg", 0.87),
-      maskUsed: used,
-    };
+    let image: string;
+    try {
+      image = out.toDataURL("image/jpeg", 0.87);
+    } catch {
+      // SecurityError: the source image was drawn from an origin that sent no
+      // CORS headers, so the browser refuses to let us read the pixels back.
+      setEditorOpen(false);
+      setStatus({
+        msg: "That image can't be edited — it was made before editing was supported. Generate a new one and it will work.",
+        type: "error",
+      });
+      return;
+    }
+    const edit = { tool: edTool.tool, label: edTool.label, image, maskUsed: used };
     setPendingEdit(edit);
     setPrompt(edPrompt);
     setEditorOpen(false);
@@ -549,7 +607,7 @@ export default function ImageStudio() {
   }
 
   /* ---------------- generate ---------------- */
-  function showImage(url: string, specs: { model: string; aspect: string; size: string }) {
+  function showImage(url: string, specs: { model: string; aspect: string; size: string; token?: string }) {
     setShown({ url, ...specs });
   }
 
@@ -651,7 +709,8 @@ export default function ImageStudio() {
         }
 
         const url: string = data.images?.[0] ?? data.imageUrl;
-        showImage(url, specs);
+        const token: string | undefined = data.imageTokens?.[0] || undefined;
+        showImage(url, { ...specs, token });
         const clip: StudioClip = {
           job_id: `${Date.now()}_${Math.floor(Math.random() * 1e6)}`,
           url,
@@ -659,6 +718,7 @@ export default function ImageStudio() {
           aspect: specs.aspect,
           size: specs.size,
           prompt: (ed ? `[${ed.label}] ` : "") + p,
+          token,
           ts: Date.now(),
         };
         pid = push(clip, pid);
@@ -699,6 +759,25 @@ export default function ImageStudio() {
   }
 
   /* ---------------- render ---------------- */
+  /**
+   * Two ideas, rotating by the day.
+   *
+   * A fixed pair goes stale the second time someone lands here. Random would
+   * fix that but can't be computed during render — the value would differ
+   * between the server's HTML and the browser's, and picking it again on any
+   * re-render would shuffle the cards under the cursor. Stepping through the
+   * list by date gives a different pair each day from a value both sides
+   * agree on, and the `mounted` gate keeps even the midnight boundary from
+   * producing a mismatch.
+   */
+  const inspiration = useMemo(() => {
+    if (!mounted) return IDEAS.slice(0, INSPIRE_COUNT);
+    return Array.from(
+      { length: INSPIRE_COUNT },
+      (_, i) => IDEAS[(TODAY * INSPIRE_COUNT + i) % IDEAS.length],
+    );
+  }, [mounted]);
+
   const activeMeta = modelMeta(model);
   const visibleModels = showAllModels ? imageModels : imageModels.slice(0, 6);
 
@@ -1159,6 +1238,7 @@ export default function ImageStudio() {
                                 model: clip.model,
                                 aspect: clip.aspect ?? "1:1",
                                 size: clip.size ?? "",
+                                token: clip.token,
                               });
                               setLastPrompt(clip.prompt);
                             }}
@@ -1186,7 +1266,7 @@ export default function ImageStudio() {
                       <p>Tap a card to reuse its prompt</p>
                     </div>
                     <div className="aig-insp-grid">
-                      {IDEAS.slice(0, 12).map((g) => (
+                      {inspiration.map((g) => (
                         <button
                           key={g.prompt}
                           type="button"
@@ -1229,6 +1309,7 @@ export default function ImageStudio() {
                           model: last.model,
                           aspect: last.aspect ?? "1:1",
                           size: last.size ?? "",
+                          token: last.token,
                         });
                         setLastPrompt(last.prompt);
                       }
@@ -1296,6 +1377,7 @@ export default function ImageStudio() {
                       model: x.clip.model,
                       aspect: x.clip.aspect ?? "1:1",
                       size: x.clip.size ?? "",
+                      token: x.clip.token,
                     });
                     setLastPrompt(x.clip.prompt);
                   }}
@@ -1429,7 +1511,21 @@ export default function ImageStudio() {
         </div>
 
         {/* ============ MASK EDITOR ============ */}
-        <div className="aig-editor" style={{ display: editorOpen ? "flex" : "none" }}>
+        {mounted &&
+          editorOpen &&
+          createPortal(
+            /*
+             * Rendered into <body>, not into the studio.
+             *
+             * This is a full-screen overlay, and a fixed element only escapes
+             * its ancestors while none of them creates a containing block for
+             * it — a transform, filter, backdrop-filter or contain on any
+             * wrapper silently turns "cover the viewport" into "cover that
+             * wrapper". The studio has several styled wrappers and picks up
+             * more over time, so the overlay should not depend on all of them
+             * staying clean. A portal makes it structurally impossible.
+             */
+            <div className="aig-editor" style={{ display: "flex" }}>
           <div className="aig-editor-top">
             <button
               type="button"
@@ -1519,11 +1615,18 @@ export default function ImageStudio() {
               <span className="aig-gen-star">✦</span> Apply
             </button>
           </div>
-        </div>
-
+            </div>,
+            document.body,
+          )}
 
         {/* ============ ASSET PICKER ============ */}
-        <div className="aig-assets" style={{ display: assetsOpen ? "flex" : "none" }}>
+        {mounted &&
+          assetsOpen &&
+          createPortal(
+            // same reasoning as the editor above: a full-screen picker must not
+            // depend on every wrapper between it and the viewport staying free
+            // of a containing-block trigger
+            <div className="aig-assets" style={{ display: "flex" }}>
           <div className="aig-editor-top">
             <button type="button" className="aig-assets-close" aria-label="Close" onClick={() => setAssetsOpen(false)}>
               ×
@@ -1538,7 +1641,7 @@ export default function ImageStudio() {
                   type="button"
                   className="aig-asset"
                   style={{ backgroundImage: `url(${x.clip.url})` }}
-                  onClick={() => srcMenu && void loadEditor(x.clip.url, srcMenu)}
+                  onClick={() => srcMenu && void loadEditor(editableSrc(x.clip.url, x.clip.token), srcMenu)}
                 />
               ))}
             </div>
@@ -1546,7 +1649,9 @@ export default function ImageStudio() {
               No generated images yet — upload from device instead.
             </p>
           </div>
-        </div>
+            </div>,
+            document.body,
+          )}
       </div>
 
       {/* ============ EDIT SOURCE MENU ============ */}

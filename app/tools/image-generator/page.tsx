@@ -4,7 +4,8 @@ import ImageStudio from "@/components/studio/ImageStudio";
 import { imageModels } from "@/lib/image-models";
 
 export const metadata: Metadata = {
-  title: "AI Image Generator — Chat Free AI",
+  alternates: { canonical: "/tools/image-generator" },
+  title: "AI Image Generator",
   description:
     "Generate images with GPT Image 1.5, Imagen 4, Seedream 4.5, FLUX.2 Pro and Nano Banana — included in every paid plan, charged from your monthly credits.",
 };

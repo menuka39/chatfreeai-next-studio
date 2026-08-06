@@ -3,7 +3,8 @@ import type { Metadata } from "next";
 import { listPublishedPosts } from "@/lib/blog";
 
 export const metadata: Metadata = {
-  title: "Blog — Chat Free AI",
+  alternates: { canonical: "/blog" },
+  title: "Blog",
   description: "Guides and comparisons on free AI chat, models, and tools.",
 };
 /**

@@ -5,7 +5,8 @@ import { listShowcase } from "@/lib/showcase";
 import { videoModels } from "@/lib/video-models";
 
 export const metadata: Metadata = {
-  title: "AI Video Generator — Chat Free AI",
+  alternates: { canonical: "/tools/video-generator" },
+  title: "AI Video Generator",
   description:
     "Generate video from text with Veo 3.1, Sora 2 Pro, Kling v3, Seedance, Hailuo and Wan — included in every paid plan, charged from your monthly credits.",
 };

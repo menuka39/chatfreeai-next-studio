@@ -8,7 +8,7 @@ import AccountActions from "@/components/AccountActions";
 import SecuritySettings from "@/components/SecuritySettings";
 import PassActions from "@/components/resume/PassActions";
 
-export const metadata: Metadata = { title: "Your account — Chat Free AI" };
+export const metadata: Metadata = { title: "Your account" };
 export const dynamic = "force-dynamic";
 
 interface ProfileRow {

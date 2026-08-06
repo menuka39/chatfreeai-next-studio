@@ -4,7 +4,8 @@ import AudioStudio from "@/components/studio/AudioStudio";
 import { musicModels } from "@/lib/music-models";
 
 export const metadata: Metadata = {
-  title: "AI Music Generator — Chat Free AI",
+  alternates: { canonical: "/tools/music-generator" },
+  title: "AI Music Generator",
   description:
     "Generate music and spoken audio from a text prompt. Lyria 3 for full songs and clips, GPT Audio for speech — included with any paid package.",
 };

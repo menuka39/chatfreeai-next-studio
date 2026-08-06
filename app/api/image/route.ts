@@ -6,6 +6,7 @@ import { effectiveCredits, type LimitId } from "@/lib/plan-limits";
 import { charge, userMonthlyKey } from "@/lib/quota";
 import { getSession, planFor } from "@/lib/session";
 import { openRouterKey } from "@/lib/openrouter";
+import { signVideoUrl } from "@/lib/video-token";
 
 export const runtime = "nodejs";
 // Vercel: image generation is synchronous, up to ~25s + retries.
@@ -210,6 +211,16 @@ export async function POST(req: NextRequest) {
 
   return Response.json({
     images,
+    /*
+     * A signature per image, so the mask editor can load it through our own
+     * proxy. Provider CDNs don't send CORS headers, and a canvas that draws a
+     * cross-origin image without them is "tainted": toDataURL throws, so the
+     * edit can never be sent. Setting crossOrigin to work around that is worse
+     * — the image then fails to load at all and the editor opens blank.
+     *
+     * Data URLs need none of this and get an empty token.
+     */
+    imageTokens: images.map((u) => (u.startsWith("data:") ? "" : signVideoUrl(u))),
     // kept for older clients that expect a single image
     imageUrl: images[0],
     credits: images.length < n ? creditsForUsd(priced.usd * images.length) : credits,

@@ -3,7 +3,8 @@ import type { Metadata } from "next";
 import VideoToPrompt from "@/components/VideoToPrompt";
 
 export const metadata: Metadata = {
-  title: "Video to Prompt — Chat Free AI",
+  alternates: { canonical: "/tools/video-to-prompt" },
+  title: "Video to Prompt",
   description:
     "Upload a video and get the text-to-video prompt that would recreate it — scene, subject, camera movement, lighting, colour grade and pacing. Included with any paid package.",
 };

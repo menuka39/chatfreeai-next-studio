@@ -28,7 +28,9 @@ const SITE_URL = process.env.SITE_URL ?? "https://chatfreeai.com";
  * models, no sign-up) rather than restating the brand alone.
  */
 export const metadata: Metadata = {
-  title: "Chat GPT Free, Gemini & Claude — No Sign-Up | Chat Free AI",
+  // absolute: this one already carries the brand, and the root template
+  // would otherwise append it a second time
+  title: { absolute: "Chat GPT Free, Gemini & Claude — No Sign-Up | Chat Free AI" },
   description:
     "Chat free with ChatGPT, Gemini, Claude, Grok and more — no sign-up, no login, no daily cap. Compare answers side by side, free forever.",
   alternates: { canonical: SITE_URL },
@@ -75,23 +77,6 @@ const trustPoints = [
   },
 ];
 
-const testimonials = [
-  {
-    quote: "I compare answers between Deepseek and ChatGPT before submitting code reviews. Saves me a paid subscription.",
-    name: "Ravindu P.",
-    role: "Software engineer",
-  },
-  {
-    quote: "The resume builder got me interview calls in a week. Paying only for what I generated felt fair.",
-    name: "Ishara W.",
-    role: "Marketing graduate",
-  },
-  {
-    quote: "We use the screener for shortlisting. Clear pricing meant finance approved it without a meeting.",
-    name: "Dilan F.",
-    role: "HR lead, retail chain",
-  },
-];
 
 const faqs = [
   {
@@ -191,7 +176,7 @@ export default function Home() {
           <div className="max-w-2xl">
             <p className="text-sm font-semibold uppercase tracking-wide text-brand">Built on trust</p>
             <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
-              Free where it can be. Honest where it can't.
+              Free where it can be. Honest where it can&apos;t.
             </h2>
             <p className="mt-4 text-ink-mute">
               Chat stays free. Heavy tools — video, bulk generation, enterprise search — cost real
@@ -244,38 +229,6 @@ export default function Home() {
                   Try it →
                 </span>
               </Link>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Testimonials */}
-      <section className="border-b border-line px-6 py-16 sm:py-20">
-        <div className="mx-auto max-w-6xl">
-          <div className="max-w-2xl">
-            <p className="text-sm font-semibold uppercase tracking-wide text-brand">What users say</p>
-            <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
-              Trusted for real work
-            </h2>
-          </div>
-          <div className="mt-10 grid gap-5 md:grid-cols-3">
-            {testimonials.map((t) => (
-              <figure key={t.name} className="card-shadow rounded-xl border border-line bg-surface p-6">
-                <div className="flex gap-0.5 text-warn" aria-label="5 out of 5 stars">
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <svg key={i} width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                      <path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7L12 17l-6.2 3.9 1.6-7L2 9.2l7.1-.6L12 2z" />
-                    </svg>
-                  ))}
-                </div>
-                <blockquote className="mt-4 text-[15px] leading-relaxed text-ink">
-                  &ldquo;{t.quote}&rdquo;
-                </blockquote>
-                <figcaption className="mt-4 text-sm">
-                  <span className="font-semibold text-ink">{t.name}</span>
-                  <span className="text-ink-faint"> · {t.role}</span>
-                </figcaption>
-              </figure>
             ))}
           </div>
         </div>
@@ -376,7 +329,6 @@ export default function Home() {
        * ------------------------------------------------------------------ */}
       <script
         type="application/ld+json"
-        // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{
           __html: JSON.stringify([
             {

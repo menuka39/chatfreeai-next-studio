@@ -14,7 +14,8 @@ const CATEGORY_ACCENT = {
 } as const;
 
 export const metadata: Metadata = {
-  title: "Free & Premium AI Tools — Chat Free AI",
+  alternates: { canonical: "/tools" },
+  title: "Free & Premium AI Tools",
   description: "Image, video, audio generation and productivity AI tools — free to try, clear pricing on premium runs.",
 };
 

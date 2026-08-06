@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import ProjectsLibrary from "@/components/ProjectsLibrary";
 
 export const metadata: Metadata = {
-  title: "Projects — Chat Free AI",
+  alternates: { canonical: "/projects" },
+  title: "Projects",
   description:
     "Group chats that share the same background. A project's brief is sent with every conversation inside it.",
 };

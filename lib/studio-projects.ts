@@ -29,6 +29,8 @@ export interface StudioClip {
   /* image */
   aspect?: string;
   size?: string;
+  /** signature that lets the mask editor read this image through our proxy */
+  token?: string;
 
   /* video */
   dur?: number;

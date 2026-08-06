@@ -145,7 +145,11 @@ export function geminiToOpenAIStream(body: ReadableStream<Uint8Array>): Readable
 
             let ev: {
               candidates?: { content?: { parts?: { text?: string }[] } }[];
-              usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+              usageMetadata?: {
+                promptTokenCount?: number;
+                candidatesTokenCount?: number;
+                thoughtsTokenCount?: number;
+              };
               error?: unknown;
             };
             try {
@@ -171,7 +175,12 @@ export function geminiToOpenAIStream(body: ReadableStream<Uint8Array>): Readable
             if (ev.usageMetadata) {
               // cumulative, so replace rather than add
               promptTokens = ev.usageMetadata.promptTokenCount ?? promptTokens;
-              completionTokens = ev.usageMetadata.candidatesTokenCount ?? completionTokens;
+              // Reasoning is reported apart from the answer but billed at the
+              // same output rate, so leaving it out means paying Google for
+              // tokens nobody is charged for.
+              completionTokens =
+                (ev.usageMetadata.candidatesTokenCount ?? 0) +
+                (ev.usageMetadata.thoughtsTokenCount ?? 0) || completionTokens;
             }
           }
         }

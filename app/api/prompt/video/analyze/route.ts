@@ -27,7 +27,36 @@ export const maxDuration = 300;
  */
 
 const MONTH_TTL = 60 * 60 * 24 * 40;
-const RESERVE_CREDITS = 300_000;
+/**
+ * What to hold before starting, estimated from the video's own length.
+ *
+ * A flat hold is the wrong shape here: video is charged per second of footage,
+ * so a two-minute clip costs roughly six times a twenty-second one. Holding a
+ * fixed 300k let someone with almost nothing left start a job that would
+ * settle at ten times that — the gate passed and the bill landed afterwards.
+ *
+ * Gemini reads video at roughly 300 tokens a second. The estimate is rounded
+ * up and floored, because holding too little is the failure that matters.
+ */
+function reserveFor(duration: number, weight: number) {
+  const inTokens = Math.max(20, duration) * 300 + 600;
+  // Output scales with the shot count, not just the footage: a three-minute
+  // video split at 5s is two dozen prompts. A flat allowance under-held on
+  // exactly the longest jobs, which are the expensive ones.
+  const maxScenes = Math.min(MAX_SCENES, Math.ceil(Math.max(20, duration) / 5));
+  const outTokens = 2000 + maxScenes * 220;
+  return Math.max(300_000, Math.ceil((inTokens + outTokens) * weight * 1.1));
+}
+
+/**
+ * Settles are applied with no ceiling on purpose.
+ *
+ * charge() refuses anything that would push a user past their limit — correct
+ * before doing work, wrong afterwards. The response has already been streamed;
+ * refusing the settle here would silently hand it over for the price of the
+ * hold. Any overshoot is caught by the reserve on the next request.
+ */
+const NO_CEILING = Number.MAX_SAFE_INTEGER;
 
 /**
  * Which model to analyse with, in order of preference.
@@ -162,10 +191,16 @@ export async function POST(req: NextRequest) {
     return deny(503, "not_configured", "The analysis model isn't available right now.");
   }
 
+  const sceneSeconds = SCENE_LENGTHS.includes(body.sceneSeconds as SceneLength)
+    ? (body.sceneSeconds as number)
+    : 0;
+  const duration = Math.min(3600, Math.max(0, Number(body.duration) || 0));
+
   const key = userMonthlyKey(session.userId, session.periodStart);
   const limit = await effectiveCredits(session.packageId! as LimitId);
 
-  const reserve = await charge(key, session.periodStart, limit, RESERVE_CREDITS, MONTH_TTL);
+  const reserved = reserveFor(duration, model.weight);
+  const reserve = await charge(key, session.periodStart, limit, reserved, MONTH_TTL);
   if (!reserve.ok) {
     void deletePublicAsset(path);
     return deny(429, "package_exhausted", "Not enough credits left in your package.", {
@@ -175,7 +210,7 @@ export async function POST(req: NextRequest) {
 
   // give the credits back on any path that doesn't produce output
   const release = async () => {
-    await charge(key, session.periodStart, limit, -RESERVE_CREDITS, MONTH_TTL);
+    await charge(key, session.periodStart, NO_CEILING, -reserved, MONTH_TTL);
     void deletePublicAsset(path);
   };
 
@@ -188,10 +223,6 @@ export async function POST(req: NextRequest) {
    * clamped rather than trusted — a bad value would otherwise decide how many
    * scenes to ask for and how many output tokens to buy.
    */
-  const sceneSeconds = SCENE_LENGTHS.includes(body.sceneSeconds as SceneLength)
-    ? (body.sceneSeconds as number)
-    : 0;
-  const duration = Math.min(3600, Math.max(0, Number(body.duration) || 0));
   const scenePlan = planScenes(duration, sceneSeconds).slice(0, MAX_SCENES);
   const sceneCount = scenePlan.length;
   const scenes = sceneCount > 1;
@@ -337,7 +368,7 @@ export async function POST(req: NextRequest) {
         // Settle against real usage. Video tokens dwarf the text, so this is
         // usually a top-up rather than a refund.
         const credits = Math.ceil((promptTokens + completionTokens) * model.weight);
-        await charge(key, session.periodStart, limit, credits - RESERVE_CREDITS, MONTH_TTL);
+        await charge(key, session.periodStart, NO_CEILING, credits - reserved, MONTH_TTL);
 
         // The clip only existed so Gemini could read it once.
         void deletePublicAsset(path);

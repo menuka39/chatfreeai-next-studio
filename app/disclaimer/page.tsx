@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Disclaimer — Chat Free AI" };
+export const metadata: Metadata = { title: "Disclaimer" };
 
 export default function DisclaimerPage() {
   return (

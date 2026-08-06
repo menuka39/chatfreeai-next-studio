@@ -143,3 +143,36 @@
 	max-width: 100%;
 	overflow-x: clip;
 }
+
+/* ---------------------------------------------------------------------------
+   Inspiration cards — two, and bigger
+   A dozen small cards under the viewer read as filler: nobody scans them, and
+   at that size the thumbnail says nothing and the title truncates. Two cards
+   across the same width get a real image area and a title that fits.
+   --------------------------------------------------------------------------- */
+.aig-insp-thumb {
+	aspect-ratio: 16 / 10;
+	border-radius: 14px;
+}
+.aig-insp-card {
+	padding: 12px;
+	border-radius: 18px;
+}
+.aig-insp-title {
+	margin-top: 14px;
+	font-size: 18px;
+}
+.aig-insp-desc {
+	font-size: 13.5px;
+}
+
+@media (max-width: 560px) {
+	/* One per row on a phone: two 16:10 thumbs side by side are thumbnails of
+	   thumbnails. */
+	.aig-insp-thumb {
+		aspect-ratio: 16 / 9;
+	}
+	.aig-insp-title {
+		font-size: 16px;
+	}
+}

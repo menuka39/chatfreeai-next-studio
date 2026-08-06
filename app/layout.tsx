@@ -6,6 +6,8 @@ import "./globals.css";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 
+const SITE_URL = process.env.SITE_URL ?? "https://chatfreeai.com";
+
 const geist = localFont({
   src: "./fonts/Geist-Variable.woff2",
   variable: "--font-geist",
@@ -44,9 +46,46 @@ const geistMono = localFont({
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Chat Free AI — 24 AI models, one chat. 8 free for everyone.",
+  /**
+   * Resolves every relative URL in metadata — canonicals, Open Graph images,
+   * alternates. Without it Next emits relative og:image paths, which most
+   * crawlers and every social scraper reject, and a page-level canonical of
+   * "/pricing" resolves against nothing.
+   */
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: "Chat Free AI — 24 AI models, one chat. 8 free for everyone.",
+    // Page titles read as "<page> — Chat Free AI" without each one repeating
+    // the brand by hand, which is where inconsistency creeps in.
+    template: "%s — Chat Free AI",
+  },
   description:
     "Use ChatGPT, Gemini, Deepseek, Claude and more from one free chat — no account needed. Every paid plan unlocks every premium model version.",
+  applicationName: "Chat Free AI",
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    siteName: "Chat Free AI",
+    // No `url` here on purpose: it is inherited, so setting it made every page
+    // advertise the homepage as its canonical Open Graph URL. Pages that care
+    // set their own alongside their canonical.
+    locale: "en_US",
+  },
+  twitter: { card: "summary_large_image" },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      // Let Google show full text snippets, large image previews and full
+      // video previews. The defaults are conservative, and a truncated
+      // snippet is a smaller, less clickable result.
+      "max-snippet": -1,
+      "max-image-preview": "large",
+      "max-video-preview": -1,
+    },
+  },
 };
 
 /**

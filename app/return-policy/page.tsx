@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-export const metadata: Metadata = { title: "Refund Policy — Chat Free AI" };
+export const metadata: Metadata = { title: "Refund Policy" };
 
 export default function RefundPage() {
   return (

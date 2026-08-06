@@ -20,9 +20,13 @@ export async function generateMetadata({
   const tool = tools.find((t) => t.slug === slug);
   if (!tool) return {};
   const text = textToolBySlug(slug);
+  const title = text?.name ?? tool.name;
+  const description = text?.intro ?? tool.description;
   return {
-    title: `${text?.name ?? tool.name} — Chat Free AI`,
-    description: text?.intro ?? tool.description,
+    title,
+    description,
+    alternates: { canonical: `/tools/${slug}` },
+    openGraph: { title: `${title}`, description, url: `/tools/${slug}`, type: "website" },
   };
 }
 

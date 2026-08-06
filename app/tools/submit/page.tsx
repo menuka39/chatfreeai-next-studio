@@ -3,7 +3,8 @@ import type { Metadata } from "next";
 import SubmitToolForm from "@/components/submit/SubmitToolForm";
 
 export const metadata: Metadata = {
-  title: "Submit Your AI Tool — Chat Free AI",
+  alternates: { canonical: "/tools/submit" },
+  title: "Submit Your AI Tool",
   description:
     "List your AI tool on Chat Free AI. Free listings are reviewed in the order received, or skip the line with Priority Listing — live in as little as 6 hours.",
 };

@@ -6,6 +6,7 @@ import { effectiveResumePass } from "@/lib/plan-limits";
 import { resumeTemplates } from "@/lib/resume-templates";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/tools/resume-builder" },
   title: "Resume Templates — 40 ATS-friendly designs | Chat Free AI",
   description:
     "Pick from 40 professionally designed resume templates, then build with a structured editor, live preview, ATS score and AI help. Free PDF download.",
