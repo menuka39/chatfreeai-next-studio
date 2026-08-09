@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { modelById, canUseModel, effectiveWeight } from "@/lib/models";
+import { modelById, canUseModel, effectiveWeight, unlimitedModels } from "@/lib/models";
 import {
   chatFeatures,
   featureKey,
@@ -16,9 +16,10 @@ import {
 } from "@/lib/turnstile";
 import { createHash } from "crypto";
 import { livePrices } from "@/lib/price-oracle";
-import { packageById, restrictionsFor } from "@/lib/packages";
+import { packageById, restrictionsFor, FREE_LIMITS } from "@/lib/packages";
 import { effectiveCredits, type LimitId } from "@/lib/plan-limits";
 import {
+  takePace,
   charge,
   guestKeys,
   userDailyKey,
@@ -252,7 +253,34 @@ export async function POST(req: NextRequest) {
   let limit: number;
   let ttl = 60 * 60 * 36;
 
-  if (plan !== "free") {
+  /*
+   * Uncapped models skip the credit ledger entirely.
+   *
+   * Charging them and then calling the result "unlimited" would be the same
+   * false promise the meta description used to make — the user hits a wall the
+   * page told them was not there. Pace limiting takes its place: it stops a
+   * script without ever interrupting someone typing.
+   */
+  const uncapped = plan === "free" && model.unlimited === true;
+  if (uncapped) {
+    const g = guestKeys(clientIp(req), body.deviceId ?? null);
+    const pace = await takePace(session.userId ?? g.device);
+    if (!pace.ok) {
+      return deny(
+        429,
+        "too_fast",
+        "That is a lot of messages at once — give it a moment and send it again.",
+        { retryAfter: pace.retryAfter },
+      );
+    }
+  }
+
+  if (uncapped) {
+    // nothing to reserve, nothing to settle
+    keys = [];
+    period = day;
+    limit = 0;
+  } else if (plan !== "free") {
     // admin-adjustable in /admin/limits — falls back to lib/packages.ts if never overridden
     const pkgCredits = await effectiveCredits(session.packageId! as LimitId);
     keys = [userMonthlyKey(session.userId!, session.periodStart)];
@@ -557,6 +585,16 @@ export async function GET(req: NextRequest) {
   return Response.json({
     tier: f.tier,
     label: f.label,
+    /*
+     * The daily allowance, so the composer can state the real figure.
+     * It is adjustable from /admin/limits, and a number typed into the UI
+     * would keep claiming the old one after a change.
+     */
+    // names, so the composer can say which models are uncapped without
+    // duplicating the catalogue on the client
+    unlimitedModels: unlimitedModels.map((m) => m.name),
+    dailyCredits: FREE_LIMITS.guest,
+    signedInDailyCredits: FREE_LIMITS.free,
     turnstileSiteKey:
       f.tier === "guest" && turnstileConfigured()
         ? process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY

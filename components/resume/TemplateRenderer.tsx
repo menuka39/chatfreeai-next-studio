@@ -1,4 +1,22 @@
 "use client";
+/* eslint-disable react-hooks/static-components -- see note */
+/*
+ * The eleven builders below (Heading, Header, Photo, SidebarContent, the
+ * section blocks) are declared inside the renderer because each one closes
+ * over the template config, the accent colour and the resume data — passing
+ * all four through props on every call would be noisier than the problem.
+ *
+ * The rule is right in general: a component created during render is a new
+ * type each time, so React remounts its subtree and anything stateful inside
+ * is lost. Here every one of them is pure presentation with no state, no
+ * effects and no animation, so the cost is re-rendering rather than losing
+ * anything — and this component only re-renders when the resume changes.
+ *
+ * The proper fix is to lift them out and thread the config through. That is a
+ * mechanical change across a file whose whole job is pixel output, so it wants
+ * doing with the templates visible side by side, not blind.
+ */
+
 
 import { PHOTO_PLACEHOLDER, type ResumeData } from "@/lib/resume";
 import type { ResumeTemplate } from "@/lib/resume-templates";

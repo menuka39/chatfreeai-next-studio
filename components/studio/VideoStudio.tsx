@@ -57,6 +57,67 @@ const SUGGEST = [
  */
 const KEEP_OPEN = "[data-studio-open]";
 
+/**
+ * Where an in-flight render is parked.
+ *
+ * A render takes minutes and the credits are charged the moment it starts.
+ * Holding the job id only in a closure meant a refresh, a stray back button or
+ * a phone locking the tab threw it away — the video still finished on the
+ * provider, the user still paid, and there was no way to get it. Writing it
+ * down costs one localStorage key.
+ */
+const PENDING_KEY = "avg_pending_job_v1";
+
+interface PendingJob {
+  jobId: string;
+  refundToken: string;
+  startedAt: number;
+  specs: {
+    model: string;
+    dur: number;
+    aspect: string;
+    res: string;
+    prompt: string;
+    projectId: string | null;
+    seedFrame?: string;
+    seed?: number;
+    parentJobId?: string;
+    ts: number;
+  };
+}
+
+function readPending(): PendingJob | null {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY);
+    if (!raw) return null;
+    const job = JSON.parse(raw) as PendingJob;
+    // A provider job that has not finished in twenty minutes is not coming
+    // back; keeping it would leave the studio stuck on a spinner forever.
+    if (Date.now() - job.startedAt > 20 * 60_000) {
+      localStorage.removeItem(PENDING_KEY);
+      return null;
+    }
+    return job;
+  } catch {
+    return null;
+  }
+}
+
+const writePending = (job: PendingJob | null) => {
+  try {
+    if (job) localStorage.setItem(PENDING_KEY, JSON.stringify(job));
+    else localStorage.removeItem(PENDING_KEY);
+  } catch {
+    /* private browsing — the render still works, it just can't be resumed */
+  }
+};
+
+/** "2m 14s" — long enough that a bare spinner reads as a hang. */
+function elapsedLabel(ms: number) {
+  const s = Math.floor(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
 const MODEL_COLORS = ["#7c5cff", "#2bd4d9", "#ff8a3d", "#45d483", "#ff6b9d", "#ffb547"];
 
 function modelColor(slug: string) {
@@ -119,6 +180,8 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
   const [specsOpen, setSpecsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [progTxt, setProgTxt] = useState("Rendering…");
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const [status, setStatus] = useState<{ msg: string; type?: "error" | "success" } | null>(null);
   const [shown, setShown] = useState<
     | { url: string; download: string; raw: string; model: string; dur: number; aspect: string; res: string }
@@ -210,6 +273,13 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
     };
   }, []);
 
+  /* a visible clock: minutes of "Rendering…" with nothing moving reads as a hang */
+  useEffect(() => {
+    if (!busy || startedAt === null) return;
+    const id = setInterval(() => setElapsed(Date.now() - startedAt), 1000);
+    return () => clearInterval(id);
+  }, [busy, startedAt]);
+
   const goto = (v: View) => setView((cur) => (cur === v ? "generate" : v));
 
   const arCss = (a: string) => {
@@ -274,6 +344,8 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
         const served = st.videoToken && /^https?:/i.test(st.videoUrl)
           ? proxiedVideo(st.videoUrl, st.videoToken)
           : st.videoUrl;
+        writePending(null);
+        setStartedAt(null);
         setBusy(false);
         setStatus(null);
         loadVideo(served, { model: specs.model, dur: specs.dur, aspect: specs.aspect, res: specs.res }, {
@@ -301,6 +373,8 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
       }
 
       if (st.status === "failed") {
+        writePending(null);
+        setStartedAt(null);
         setBusy(false);
         setStatus({ msg: st.error ?? "Generation failed. Your credits were refunded.", type: "error" });
         void refreshCredits();
@@ -314,6 +388,31 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
       schedulePoll(jobId, refundToken, specs, Math.max(attempt, 4));
     }
   }
+
+  /**
+   * Pick up a render that was already running when the page closed.
+   *
+   * The provider keeps working whether or not the tab is open, and the credits
+   * were taken at the start — so on a reload the only question is whether the
+   * user gets what they paid for. Polling resumes from the stored job id and
+   * the clip lands in the same project it would have.
+   */
+  useEffect(() => {
+    const job = readPending();
+    if (!job) return;
+    // Reading localStorage on mount is the external-system case this rule
+    // exists to allow; it cannot tell a one-shot read from a render loop.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBusy(true);
+    setStartedAt(job.startedAt);
+    setElapsed(Date.now() - job.startedAt);
+    setStatus({ msg: "Picking up the render that was already running…" });
+    // one tick of delay so the poller sees the state above
+    const id = setTimeout(() => void poll(job.jobId, job.refundToken, job.specs, 4), 300);
+    return () => clearTimeout(id);
+    // once, on mount: a resumed job is resumed exactly once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Restate the parent shot before the new instruction.
@@ -385,6 +484,13 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
         if (data.error === "plan_required" || data.error === "package_exhausted") setView("payment");
         return;
       }
+      setStartedAt(Date.now());
+      writePending({
+        jobId: data.jobId,
+        refundToken: data.refundToken ?? "",
+        startedAt: Date.now(),
+        specs,
+      });
       schedulePoll(data.jobId, data.refundToken ?? "", specs, 0);
     } catch {
       setBusy(false);
@@ -830,7 +936,9 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
                     {busy ? "Rendering…" : extendMode ? "Render continuation" : "Render video"}
                   </span>
                   <span className="avg-gen-badge">
-                    <span className="avg-cost">{fmtCredits(cost)} credits</span>
+                    <span className="avg-cost">
+                      {fmtCredits(cost)} credits · {model.genTime}
+                    </span>
                   </span>
                 </button>
 
@@ -894,7 +1002,16 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
                     />
                     <div className="avg-prog" style={{ display: busy ? "flex" : "none" }}>
                       <span className="avg-spinner" />
-                      <span className="avg-prog-txt">{progTxt}</span>
+                      <span className="avg-prog-txt">
+                        {progTxt}
+                        {startedAt !== null && (
+                          <>
+                            {" · "}
+                            {elapsedLabel(elapsed)}
+                            <span className="avg-prog-eta"> of {model.genTime}</span>
+                          </>
+                        )}
+                      </span>
                     </div>
                   </div>
 

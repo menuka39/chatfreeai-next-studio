@@ -1,5 +1,12 @@
 import Link from "next/link";
 import { loadBranding } from "@/lib/branding";
+import { baseModels, premiumModels } from "@/lib/models";
+import { videoModels } from "@/lib/video-models";
+import { imageModels } from "@/lib/image-models";
+
+// counted rather than typed — the hard-coded line said 24 chat models while
+// the catalogue held 35, and nothing would have caught it
+const chatCount = baseModels.length + premiumModels.length;
 
 const columns = [
   {
@@ -40,7 +47,13 @@ export default async function Footer() {
             <p className="flex items-center gap-2 font-display text-lg font-semibold">
               {logoUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={logoUrl} alt={siteName} className="h-7 w-7 rounded-md object-contain" />
+                <img
+              src={logoUrl}
+              alt={siteName}
+              width={28}
+              height={28}
+              className="h-7 w-7 rounded-md object-contain"
+            />
               ) : (
                 <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand text-sm font-bold">
                   {siteName.charAt(0).toUpperCase()}
@@ -49,7 +62,8 @@ export default async function Footer() {
               {siteName}
             </p>
             <p className="mt-3 max-w-[24ch] text-sm text-ink-mute">
-              24 chat models, 8 video and 9 image models. 8 free for everyone, no login.
+              {chatCount} chat models, {videoModels.length} video and {imageModels.length} image
+              models. {baseModels.length} free for everyone, no login.
             </p>
           </div>
           {columns.map((col) => (

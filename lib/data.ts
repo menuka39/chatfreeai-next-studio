@@ -136,14 +136,6 @@ export const tools: Tool[] = [
       "A character profile with a name, core traits, speech style, a background hook and what drives them.",
   },
   {
-    slug: "video-editor",
-    name: "Video Editor",
-    category: "Generate",
-    tagline: "Timeline editing, entirely in your browser",
-    description:
-      "Trim, split, add text and captions, then export. Nothing uploads, nothing is watermarked, and it keeps working offline.",
-  },
-  {
     slug: "video-to-prompt",
     name: "Video to Prompt",
     category: "Generate",

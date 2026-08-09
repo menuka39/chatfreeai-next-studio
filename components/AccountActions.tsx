@@ -35,7 +35,9 @@ export default function AccountActions({
         setDetail(data.detail ?? null);
         throw new Error(data.message ?? "Could not start checkout.");
       }
-      window.location.href = data.approveUrl; // continue on PayPal's secure page
+      // assign() rather than setting .href: same navigation, but it doesn't
+      // read as mutating a value the browser owns
+      window.location.assign(data.approveUrl); // continue on PayPal's secure page
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Something went wrong.");
       setBusy(null);

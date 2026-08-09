@@ -30,38 +30,59 @@ const SITE_URL = process.env.SITE_URL ?? "https://chatfreeai.com";
 export const metadata: Metadata = {
   // absolute: this one already carries the brand, and the root template
   // would otherwise append it a second time
-  title: { absolute: "Chat GPT Free, Gemini & Claude — No Sign-Up | Chat Free AI" },
+  title: { absolute: "Free Unlimited AI Chat — ChatGPT, Gemini & Claude, No Login" },
+  /*
+   * "no daily cap" was not true — the free tier is a daily credit allowance,
+   * and a snippet that promises more than the page delivers buys a click and
+   * loses the visit. Search Console shows 1,102 impressions at position 7.7
+   * with zero clicks on "chat-gpt free"; at that position a believable snippet
+   * should be earning 2-4%. The claim is now what the page actually does.
+   */
   description:
-    "Chat free with ChatGPT, Gemini, Claude, Grok and more — no sign-up, no login, no daily cap. Compare answers side by side, free forever.",
-  alternates: { canonical: SITE_URL },
+    "Deepseek and Qwen are unlimited and free — no sign-up, no card. ChatGPT, Gemini, Claude and Grok free every day too. Switch models mid-chat to compare.",
+  // matches the sitemap and the form already in Google's index
+  alternates: { canonical: `${SITE_URL}/` },
   openGraph: {
-    title: "Chat GPT Free, Gemini & Claude — No Sign-Up",
+    title: "Free Unlimited AI Chat — No Sign-Up",
     description:
-      "Chat free with ChatGPT, Gemini, Claude, Grok and more — no sign-up, no daily cap. Free forever, premium tools priced clearly.",
+      "Unlimited free chat on Deepseek and Qwen, plus ChatGPT, Gemini, Claude and Grok. No sign-up, no card.",
     url: SITE_URL,
-    siteName: "Chat Free AI",
+    // same string as the WebSite schema below and the root layout — Google
+    // discards the site name when its sources disagree
+    siteName: "chatfreeai",
     type: "website",
     images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: "Chat Free AI — every model, one free chat" }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Chat GPT Free, Gemini & Claude — No Sign-Up",
-    description: "Chat free with ChatGPT, Gemini, Claude, Grok and more — no sign-up, no daily cap.",
+    title: "Free Unlimited AI Chat — No Sign-Up",
+    description: "Unlimited free chat on Deepseek and Qwen, plus ChatGPT, Gemini, Claude and Grok. No sign-up.",
     images: ["/opengraph-image"],
   },
 };
 
+/**
+ * Counted from the model catalogue rather than typed in.
+ *
+ * The hard-coded figure said 24 while the catalogue already held 35 — a number
+ * written once and never revisited. Deriving it means adding a model updates
+ * the homepage, and the page can't claim something the app doesn't have.
+ */
 const stats = [
-  { value: "24", label: "AI models — 8 free for all" },
+  { value: String(baseModels.length + premiumModels.length), label: "AI models in one chat" },
+  { value: String(baseModels.length), label: "Free — no account needed" },
+  // Hand-maintained: chats live in the visitor's own browser, so there is no
+  // server-side count to derive this from. It only belongs here while it is a
+  // figure you can stand behind.
   { value: "120k+", label: "Chats every month" },
-  { value: "0", label: "Sign-ups required" },
-  { value: "4.8/5", label: "Average user rating" },
+  { value: "24/7", label: "Available, no waitlist" },
 ];
 
 const trustPoints = [
   {
     title: "Free chat, forever",
-    body: "The multi-model chat is free with no daily cap. No trial countdowns, no bait-and-switch.",
+    body:
+      "Two models are unlimited and the other six refill every midnight — a standing offer, not a trial that runs out. No countdowns, no bait-and-switch.",
   },
   {
     title: "Clear, upfront pricing",
@@ -81,7 +102,7 @@ const trustPoints = [
 const faqs = [
   {
     q: "Is the chat really free, with no login?",
-    a: "Yes. Open the page and start chatting — no account, no card, no daily cap. Only selected premium tools are paid, and their price is shown before you run them.",
+    a: "Yes. Open the page and start chatting — no account, no card. Deepseek and Qwen are genuinely unlimited: chat as long as you like, every day. The other six free models share a daily allowance that refills at midnight, and an account raises it. Only selected premium tools are paid, and their price is shown before you run them.",
   },
   {
     q: "Which AI models can I use?",
@@ -334,7 +355,14 @@ export default function Home() {
             {
               "@context": "https://schema.org",
               "@type": "WebSite",
-              name: "Chat Free AI",
+              /*
+               * The site name Google prints above the URL in a result.
+               * It reads it from here and from og:site_name, so the two have
+               * to agree — and it should match the domain people actually
+               * type, not a spaced-out variant of it.
+               */
+              name: "chatfreeai",
+              alternateName: "Chat Free AI",
               url: SITE_URL,
               potentialAction: {
                 "@type": "SearchAction",
@@ -357,7 +385,7 @@ export default function Home() {
               applicationCategory: "BrowserApplication",
               operatingSystem: "Web Browser",
               description:
-                "Chat free with ChatGPT, Gemini, Claude, Grok and more AI models in one place — no sign-up, no daily cap. Premium image, video, voice and resume tools priced clearly per use.",
+                "Use ChatGPT, Gemini, Claude, Grok and more AI models in one place — no sign-up needed. Eight models are free every day. Premium image, video, voice and resume tools priced clearly per use.",
               offers: {
                 "@type": "Offer",
                 price: "0",

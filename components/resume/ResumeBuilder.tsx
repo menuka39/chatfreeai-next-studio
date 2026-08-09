@@ -5,7 +5,7 @@ import Link from "next/link";
 import ResumeEditor from "./ResumeEditor";
 import TemplateRenderer from "./TemplateRenderer";
 import ScaledPage from "./ScaledPage";
-import { resumeToPdf, type PaperSize } from "@/lib/resume-pdf";
+import type { PaperSize } from "@/lib/resume-pdf";
 import { PAPER_OPTIONS } from "@/lib/resume-paper";
 import AtsPanel from "./AtsPanel";
 import { type ResumeData, blankResume, sampleResume, ACCENTS, atsChecks, resumeToText, PHOTO_PLACEHOLDER } from "@/lib/resume";
@@ -60,6 +60,11 @@ export default function ResumeBuilder({ initialTemplate }: { initialTemplate?: s
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw);
+        // Reading the browser's own state on mount — localStorage or the URL. That
+        // has to happen after mount or the server's HTML and the client's first
+        // render disagree, and this rule can't tell a one-shot external read
+        // from a render loop.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setData(saved.data ?? blankResume());
         setTemplateSlug(initialTemplate ?? saved.templateSlug ?? "atlas");
         setAccent(saved.accent ?? "");
@@ -166,6 +171,13 @@ export default function ResumeBuilder({ initialTemplate }: { initialTemplate?: s
     setShowPdfMenu(false);
     try {
       const base = (data.fullName || "resume").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      /*
+       * jsPDF and html2canvas together are the heaviest thing this page could
+       * pull in, and most visitors are here to write a CV, not to export one
+       * — many never press the button at all. Loading them on the click keeps
+       * that weight off everyone else's first paint.
+       */
+      const { resumeToPdf } = await import("@/lib/resume-pdf");
       await resumeToPdf(data, template, accent || template.accent, {
         paper,
         atsMode,

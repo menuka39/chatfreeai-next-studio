@@ -278,3 +278,39 @@ export function limitForTier(tier: Tier, packageCredits?: number) {
   if (tier === "paid") return packageCredits ?? 0;
   return FREE_LIMITS[tier];
 }
+
+/* ------------------------------------------------------------------ */
+/* Pace limiting — what stands in for a cap on the unlimited models     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Messages a minute on an uncapped model.
+ *
+ * "Unlimited" has to mean unlimited to a person, and a person does not send
+ * twelve messages in a minute — they type, read, and think. A script does.
+ * Limiting pace rather than total is what lets the claim be true: chat all day
+ * if you like, just not faster than a human can.
+ *
+ * Kept deliberately loose. A limit tight enough to interrupt a fast typer
+ * would make the promise false again in the only way that matters — the way
+ * the user experiences it.
+ */
+export const UNLIMITED_RPM = 12;
+
+/**
+ * @returns ok:false when this caller is going faster than a person would
+ */
+export async function takePace(key: string): Promise<{ ok: boolean; retryAfter: number }> {
+  // one bucket per wall-clock minute: the key expires on its own, so there is
+  // nothing to sweep and no clock skew between instances to reconcile
+  const minute = Math.floor(Date.now() / 60_000);
+  let used: number;
+  try {
+    used = await store.incrBy(`rpm:${key}:${minute}`, 1, 120);
+  } catch {
+    // The store being unreachable is our problem, not the visitor's — a pace
+    // limiter that fails closed would take the chat down with it.
+    return { ok: true, retryAfter: 0 };
+  }
+  return { ok: used <= UNLIMITED_RPM, retryAfter: 60 - (Math.floor(Date.now() / 1000) % 60) };
+}

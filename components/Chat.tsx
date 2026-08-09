@@ -93,6 +93,7 @@ export default function Chat() {
     tier: string; label: string; paid: boolean; signedIn: boolean;
     webSearch: boolean; webSearchDaily: number;
     research: boolean; researchDaily: number;
+    dailyCredits: number; signedInDailyCredits: number; unlimitedModels: string[];
     attachments: boolean; maxAttachments: number; maxAttachmentMb: number; imageAttachments: boolean; pdfAttachments: boolean; zipAttachments: boolean;
     skills: boolean; maxSkills: number;
     projects: boolean; maxProjects: number;
@@ -138,6 +139,11 @@ export default function Chat() {
 
   useEffect(() => {
     fetch("/api/chat").then((r) => r.json()).then(setFeatures).catch(() => {});
+    // Reading the browser's own state on mount — localStorage, the URL, the
+    // server's feature flags. That has to happen after mount or the server's
+    // HTML and the client's first render disagree, and this rule can't tell a
+    // one-shot external read from a render loop.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSkills(loadSkills());
     setProjects(loadProjects());
   }, []);
@@ -154,6 +160,11 @@ export default function Chat() {
   /* ---- hydration: load saved chats once on mount ---- */
   useEffect(() => {
     const stored = loadChats();
+    // Reading the browser's own state on mount — localStorage, the URL, the
+    // server's feature flags. That has to happen after mount or the server's
+    // HTML and the client's first render disagree, and this rule can't tell a
+    // one-shot external read from a render loop.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setChats(stored);
     setHydrated(true);
   }, []);
@@ -1059,9 +1070,12 @@ export default function Chat() {
                 </button>
 
                 {features && !features.signedIn && (
-                  <a href="/login" className="ml-auto text-[11.5px] font-semibold text-brand hover:text-brand-deep">
+                  <Link
+                    href="/login"
+                    className="ml-auto text-[11.5px] font-semibold text-brand hover:text-brand-deep"
+                  >
                     Sign in to unlock →
-                  </a>
+                  </Link>
                 )}
               </div>
 
@@ -1094,7 +1108,18 @@ export default function Chat() {
                 ? `Research runs several searches, then answers with sources · ${features?.researchDaily} a day`
                 : webSearch
                   ? `Live web results will be used · ${features?.webSearchDaily} searches a day`
-                  : "Free: 8,000 tokens/day · 20,000 with a free account · Enter to send, Shift+Enter for a new line"}
+                  : /*
+                     * Credits, not tokens. The allowance is spent at the
+                     * model's own rate — the cheapest base model costs 4
+                     * credits a token, so the old line promised roughly four
+                     * times what it delivered. Both figures come from the API
+                     * so changing them in /admin/limits updates this text too.
+                     */
+                    (features?.unlimitedModels?.length
+                      ? `${features.unlimitedModels.join(" and ")} are unlimited · ` +
+                        `${(features?.dailyCredits ?? 0).toLocaleString()} credits/day on the rest · `
+                      : `Free: ${(features?.dailyCredits ?? 0).toLocaleString()} credits/day · `) +
+                    `Enter to send, Shift+Enter for a new line`}
             </p>
           </div>
         </div>

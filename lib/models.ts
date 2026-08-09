@@ -55,6 +55,15 @@ export interface ModelConfig {
   weight: number;
   /** lowest plan that unlocks this model. "free" = everyone, no login needed */
   minPlan: Plan;
+  /**
+   * Free with no daily credit cap.
+   *
+   * Reserved for the cheapest models we run, because "unlimited" is only
+   * honest if it costs little enough to mean it. Pace is still limited (see
+   * lib/quota.ts) — that stops a script, not a person, and every service that
+   * says unlimited works the same way.
+   */
+  unlimited?: boolean;
   /** shown as a "New" pill in the UI */
   isNew?: boolean;
   /** price is a guess — the oracle applies SAFETY_FACTOR when live data is
@@ -118,6 +127,7 @@ export const baseModels: ModelConfig[] = [
     price: { in: 0.09, out: 0.18 },
     weight: 2,
     minPlan: "free",
+    unlimited: true,
   },
   {
     id: "meta",
@@ -140,6 +150,7 @@ export const baseModels: ModelConfig[] = [
     price: { in: 0.065, out: 0.26 },
     weight: 2,
     minPlan: "free",
+    unlimited: true,
   },
   {
     id: "perplexity",
@@ -657,3 +668,6 @@ export async function effectiveWeight(
   const weight = model.estimated ? model.weight * SAFETY_FACTOR : model.weight;
   return { weight, usd: catalogueUsd, source: "catalogue" };
 }
+
+/** Models a signed-out visitor can use without a daily credit cap. */
+export const unlimitedModels = baseModels.filter((m) => m.unlimited);

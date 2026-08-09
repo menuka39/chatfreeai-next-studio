@@ -36,6 +36,11 @@ export default function PassActions({
     const params = new URLSearchParams(window.location.search);
     const token = params.get("token");
     if (params.get("pass") !== "success" || !token) return;
+    // Reading the browser's own state on mount — localStorage, the URL, the
+    // server's feature flags. That has to happen after mount or the server's
+    // HTML and the client's first render disagree, and this rule can't tell a
+    // one-shot external read from a render loop.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCapturing(true);
     (async () => {
       try {

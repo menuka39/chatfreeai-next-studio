@@ -20,7 +20,13 @@ export default async function Header() {
         <Link href="/" className="flex items-center gap-2.5 font-display text-[17px] font-semibold tracking-tight">
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={logoUrl} alt={siteName} className="h-8 w-8 rounded-lg object-contain" />
+            <img
+              src={logoUrl}
+              alt={siteName}
+              width={32}
+              height={32}
+              className="h-8 w-8 rounded-lg object-contain"
+            />
           ) : (
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand font-display text-sm font-bold text-white">
               {siteName.charAt(0).toUpperCase()}

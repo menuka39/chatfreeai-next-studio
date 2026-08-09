@@ -21,6 +21,23 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 
 type Panel = "none" | "email" | "password";
 
+/**
+ * Declared here rather than inside the component.
+ *
+ * A component defined during render is a brand-new type on every render, so
+ * React unmounts and remounts its subtree each time — losing any state inside
+ * it and restarting animations. It takes only props, so nothing is lost by
+ * lifting it out.
+ */
+function Note({ msg }: { msg: { ok: boolean; text: string } | null }) {
+  if (!msg) return null;
+  return (
+    <p className={`mt-3 text-[13px] leading-relaxed ${msg.ok ? "text-mint" : "font-semibold text-warn"}`}>
+      {msg.text}
+    </p>
+  );
+}
+
 export default function SecuritySettings({
   currentEmail,
   hasPassword,
@@ -164,12 +181,6 @@ export default function SecuritySettings({
     }
   }
 
-  const Note = ({ msg }: { msg: { ok: boolean; text: string } | null }) =>
-    msg ? (
-      <p className={`mt-3 text-[13px] leading-relaxed ${msg.ok ? "text-mint" : "font-semibold text-warn"}`}>
-        {msg.text}
-      </p>
-    ) : null;
 
   return (
     <div className="card-shadow mt-5 rounded-2xl border border-line bg-surface p-6">

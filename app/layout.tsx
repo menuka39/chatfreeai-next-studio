@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { GoogleAnalytics } from "@next/third-parties/google";
 import { AdSenseLoader } from "@/components/AdSense";
+import { adsenseConfigured } from "@/lib/adsense";
 import "./globals.css";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -65,7 +66,9 @@ export const metadata: Metadata = {
   alternates: { canonical: "/" },
   openGraph: {
     type: "website",
-    siteName: "Chat Free AI",
+    // must match the WebSite schema name on the homepage: Google reads
+    // both and ignores the pair when they disagree
+    siteName: "chatfreeai",
     // No `url` here on purpose: it is inherited, so setting it made every page
     // advertise the homepage as its canonical Open Graph URL. Pages that care
     // set their own alongside their canonical.
@@ -109,9 +112,29 @@ export default function RootLayout({
   // real traffic, quietly inflating the actual numbers an admin later reads.
   const gaId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
   const showAnalytics = Boolean(gaId) && process.env.NODE_ENV === "production";
+  const showAds = adsenseConfigured && process.env.NODE_ENV === "production";
 
   return (
     <html lang="en" className={`${geist.variable} ${geistMono.variable} h-full antialiased`}>
+      <head>
+        {/*
+          Each hint is tied to the script that will actually use it. A
+          preconnect the page never follows up on is not free — the browser
+          holds an idle socket open for ten seconds, and a handful of those
+          compete for the bandwidth the real requests need.
+        */}
+        {showAds && (
+          <>
+            <link
+              rel="preconnect"
+              href="https://pagead2.googlesyndication.com"
+              crossOrigin="anonymous"
+            />
+            <link rel="dns-prefetch" href="https://googleads.g.doubleclick.net" />
+          </>
+        )}
+        {showAnalytics && <link rel="preconnect" href="https://www.googletagmanager.com" />}
+      </head>
       <body className="min-h-full flex flex-col bg-canvas text-ink">
         <Header />
         <main className="flex-1">{children}</main>

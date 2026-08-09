@@ -116,6 +116,19 @@ function planIdFromEnv(packageId: string): string | null {
 /* client id + secret. Cached in memory per process.
 /* ------------------------------------------------------------------ */
 
+/**
+ * Where PayPal sends the customer back to.
+ *
+ * Falling back to localhost in production would drop someone who has just
+ * paid onto a dead address, with the money taken and no way back to the site.
+ * Outside development the domain is the only safe default.
+ */
+function returnBase() {
+  const configured = process.env.SITE_URL?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  return process.env.NODE_ENV === "production" ? "https://chatfreeai.com" : "http://localhost:3000";
+}
+
 const PRODUCT_NAME = "Chat Free AI subscription";
 /** Plan names encode the package id AND price — change a price in
  *  lib/packages.ts and a fresh plan is provisioned automatically. */
@@ -271,7 +284,7 @@ export async function createSubscription(packageId: string, userId: string, pric
     lastError = lastError ?? "Could not create or find the PayPal billing plan.";
     return null;
   }
-  const site = process.env.SITE_URL ?? "http://localhost:3000";
+  const site = returnBase();
 
   const sub = await api<{ id: string; links: { rel: string; href: string }[] }>(
     "/v1/billing/subscriptions",
@@ -339,7 +352,7 @@ export async function verifyWebhook(headers: Headers, rawBody: string): Promise<
  * user then has to remember to cancel.
  */
 export async function createPassOrder(userId: string, price: number, label: string) {
-  const site = process.env.SITE_URL ?? "http://localhost:3000";
+  const site = returnBase();
   const order = await api<{ id: string; links: { rel: string; href: string }[] }>("/v2/checkout/orders", {
     method: "POST",
     body: JSON.stringify({
@@ -388,7 +401,7 @@ export async function capturePassOrder(orderId: string) {
  * activate without trusting anything else the client sends.
  */
 export async function createToolSubmissionOrder(submissionId: string, price: number, label: string) {
-  const site = process.env.SITE_URL ?? "http://localhost:3000";
+  const site = returnBase();
   const order = await api<{ id: string; links: { rel: string; href: string }[] }>("/v2/checkout/orders", {
     method: "POST",
     body: JSON.stringify({

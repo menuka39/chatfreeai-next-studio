@@ -166,3 +166,51 @@
 	max-width: 100%;
 	overflow-x: clip;
 }
+
+/* ---------------------------------------------------------------------------
+   Mobile: keep Render reachable
+   The control column is a screen and a half on a phone — model, frames,
+   prompt, suggestions, specs — and the button sits at the bottom of it. People
+   filled in a prompt and then had to hunt for the way to run it. Pinning it to
+   the bottom of the viewport means the action is always where the thumb is.
+   --------------------------------------------------------------------------- */
+@media (max-width: 860px) {
+	.avg-generate {
+		position: sticky;
+		bottom: 10px;
+		z-index: 20;
+		box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.75);
+	}
+	/* room to scroll the last control clear of the pinned button */
+	.avg-controls {
+		padding-bottom: 8px;
+	}
+}
+
+/* The elapsed clock next to the status: quieter than the status itself, since
+   it is reassurance rather than information. */
+.avg-prog-eta {
+	opacity: 0.55;
+}
+
+@media (max-width: 560px) {
+	/* Two lines of "12,000 credits · ~1–2 min" was wrapping mid-number. */
+	.avg-gen-badge {
+		flex-basis: 100%;
+		text-align: center;
+	}
+	.avg-generate {
+		flex-wrap: wrap;
+		row-gap: 2px;
+		padding-top: 10px;
+		padding-bottom: 10px;
+	}
+	/* A 5-column aspect grid at phone width left ~48px per swatch. */
+	.avg-pop .avg-pills.avg-aspect-grid {
+		grid-template-columns: repeat(3, 1fr);
+	}
+	/* The preview was competing with the timeline for vertical space. */
+	.avg-viewer {
+		max-height: 46vh;
+	}
+}

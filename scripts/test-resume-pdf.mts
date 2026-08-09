@@ -16,7 +16,12 @@ async function extractText(bytes: Uint8Array): Promise<string> {
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);
     const content = await page.getTextContent();
-    out += content.items.map((i: any) => i.str).join(" ") + "\n";
+    // pdf.js types a text item as a union with marked-content, which has no
+    // `str`. Narrowing to the shape we read keeps the check without pulling in
+    // the library's types for a throwaway script.
+    out += content.items
+      .map((i) => (i as { str?: string }).str ?? "")
+      .join(" ") + "\n";
   }
   return out;
 }

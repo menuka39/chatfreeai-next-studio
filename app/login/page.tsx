@@ -55,6 +55,11 @@ export default function LoginPage() {
 
     // a prompt, not a failure — e.g. landing on /account before signing in
     if (params.get("notice") === "signin_required") {
+      // Reading the browser's own state on mount — localStorage, the URL, the
+      // server's feature flags. That has to happen after mount or the server's
+      // HTML and the client's first render disagree, and this rule can't tell a
+      // one-shot external read from a render loop.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
       setTone("notice");
       setMessage("Sign in to see your account.");
       window.history.replaceState({}, "", "/login");

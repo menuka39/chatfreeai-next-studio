@@ -49,38 +49,76 @@ export function AdSlot({
   slot,
   format = "auto",
   className = "",
+  minHeight = 280,
 }: {
   /** the ad unit id from AdSense (its own value, separate from the publisher id) */
   slot: string;
   format?: string;
   className?: string;
+  /**
+   * Space held for the ad before it fills, in pixels.
+   *
+   * An empty <ins> is zero-height until AdSense paints into it, and everything
+   * below then jumps down — the single biggest source of layout shift on an
+   * ad-supported page, and CLS is a ranking signal. Reserving the space costs
+   * a gap for a moment; not reserving it costs the score.
+   */
+  minHeight?: number;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
   const pushed = useRef(false);
 
   useEffect(() => {
     if (!adsenseConfigured || process.env.NODE_ENV !== "production") return;
-    // React 18+ runs effects twice in dev StrictMode, and a client-side
-    // route change can remount this — pushing the same slot twice makes
-    // AdSense log "already have ads in them", so guard it.
-    if (pushed.current) return;
-    pushed.current = true;
-    try {
-      ((window as unknown as { adsbygoogle: unknown[] }).adsbygoogle ??= []).push({});
-    } catch {
-      // an ad failing to fill is normal and never worth breaking a page over
-    }
+    const el = ref.current;
+    if (!el) return;
+
+    const fill = () => {
+      // React 18+ runs effects twice in dev StrictMode, and a client-side
+      // route change can remount this — pushing the same slot twice makes
+      // AdSense log "already have ads in them", so guard it.
+      if (pushed.current) return;
+      pushed.current = true;
+      try {
+        ((window as unknown as { adsbygoogle: unknown[] }).adsbygoogle ??= []).push({});
+      } catch {
+        // an ad failing to fill is normal and never worth breaking a page over
+      }
+    };
+
+    /*
+     * Only request the ad once the slot is near the viewport.
+     *
+     * Requesting every unit on load runs an auction for ads most visitors
+     * never scroll to — main-thread work that competes with the page becoming
+     * interactive, for impressions that don't count as viewable anyway.
+     */
+    if (typeof IntersectionObserver === "undefined") return fill();
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          fill();
+          io.disconnect();
+        }
+      },
+      { rootMargin: "300px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
   }, []);
 
   if (!adsenseConfigured) return null;
 
   return (
-    <ins
-      className={`adsbygoogle block ${className}`}
-      style={{ display: "block" }}
-      data-ad-client={ADSENSE_CLIENT_ID}
-      data-ad-slot={slot}
-      data-ad-format={format}
-      data-full-width-responsive="true"
-    />
+    <div ref={ref} className={className} style={{ minHeight }}>
+      <ins
+        className="adsbygoogle block"
+        style={{ display: "block", minHeight }}
+        data-ad-client={ADSENSE_CLIENT_ID}
+        data-ad-slot={slot}
+        data-ad-format={format}
+        data-full-width-responsive="true"
+      />
+    </div>
   );
 }

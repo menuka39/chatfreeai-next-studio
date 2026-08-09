@@ -20,32 +20,55 @@ export const dynamic = "force-dynamic";
  * `listPublishedPosts()` is the same DB-first, static-fallback function the
  * public /blog pages already use, so this always matches what's actually live.
  */
+/**
+ * The newest post is the only date this site can honestly vouch for.
+ *
+ * Everything else — the tool pages, the policies — changes when it is deployed
+ * and there is no per-page record of when that was. Stamping them all with the
+ * current time, which this used to do, is the documented way to make lastmod
+ * worthless: Google only trusts the value while it is verifiably accurate, and
+ * a sitemap where all 31 URLs change every time it is fetched teaches it to
+ * ignore the field entirely — including on the blog posts, where the dates are
+ * real and useful.
+ *
+ * So lastmod goes on the posts and nowhere else. Omitting it is not a gap;
+ * it is the honest answer to "when did this last change?"
+ */
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const now = new Date();
   const posts = await listPublishedPosts();
+
+  /*
+   * `priority` is gone. Google states plainly that it ignores the field — it
+   * was abused into meaninglessness years ago — and it was never a ranking
+   * input, only an occasional hint about crawl order within one site.
+   *
+   * `changeFrequency` stays: Google ignores it too, but some of the engines
+   * IndexNow reaches still read it, and the values here match how the pages
+   * actually behave rather than claiming everything is urgent.
+   */
+  const page = (path: string, changeFrequency: "daily" | "weekly" | "monthly" | "yearly") => ({
+    url: `${BASE}${path}`,
+    changeFrequency,
+  });
+
   return [
-    { url: BASE, lastModified: now, changeFrequency: "daily", priority: 1 },
-    { url: `${BASE}/pricing`, lastModified: now, changeFrequency: "weekly", priority: 0.9 },
-    { url: `${BASE}/tools`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
-    { url: `${BASE}/tools/submit`, lastModified: now, changeFrequency: "weekly", priority: 0.6 },
-    ...tools.map((t) => ({
-      url: `${BASE}/tools/${t.slug}`,
-      lastModified: now,
-      changeFrequency: "weekly" as const,
-      priority: 0.7,
-    })),
-    { url: `${BASE}/blog`, lastModified: now, changeFrequency: "weekly", priority: 0.6 },
+    // trailing slash on purpose: this is the form Google already has indexed
+    page("/", "daily"),
+    page("/pricing", "weekly"),
+    page("/tools", "weekly"),
+    page("/tools/submit", "weekly"),
+    ...tools.map((t) => page(`/tools/${t.slug}`, "weekly")),
+    page("/blog", "weekly"),
     ...posts.map((p) => ({
       url: `${BASE}/blog/${p.slug}`,
+      // a real date, from the post itself
       lastModified: new Date(p.date),
       changeFrequency: "monthly" as const,
-      priority: 0.5,
     })),
-    { url: `${BASE}/login`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
-    { url: `${BASE}/terms`, lastModified: now, changeFrequency: "yearly", priority: 0.2 },
-    { url: `${BASE}/privacy-policy`, lastModified: now, changeFrequency: "yearly", priority: 0.2 },
-    { url: `${BASE}/return-policy`, lastModified: now, changeFrequency: "yearly", priority: 0.2 },
-    { url: `${BASE}/disclaimer`, lastModified: now, changeFrequency: "yearly", priority: 0.1 },
-    { url: `${BASE}/contact`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
+    page("/terms", "yearly"),
+    page("/privacy-policy", "yearly"),
+    page("/return-policy", "yearly"),
+    page("/disclaimer", "yearly"),
+    page("/contact", "yearly"),
   ];
 }

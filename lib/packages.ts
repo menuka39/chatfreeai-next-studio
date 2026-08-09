@@ -12,6 +12,8 @@ import { videoModels } from "./video-models";
  * them. Deriving the number means that can't happen again.
  */
 const MODEL_COUNTS = {
+  // counted, not typed: the list said 24 while the catalogue held 35
+  chat: baseModels.length + premiumModels.length,
   audio: audioModels.length,
   image: imageModels.length,
   video: videoModels.length,
@@ -48,6 +50,7 @@ const MODEL_COUNTS = {
  */
 
 import type { Plan } from "./models";
+import { baseModels, premiumModels } from "./models";
 
 export interface Package {
   id: Exclude<Plan, "free">;
@@ -68,8 +71,8 @@ export interface Package {
 
 /** Daily free allowances — hard reset at 00:00 UTC, no carry-over, no top-ups. */
 export const FREE_LIMITS = {
-  guest: 8_000,
-  free: 20_000,
+  guest: 17_000,
+  free: 30_000,
 } as const;
 
 /** Restrictions that apply to the free tiers. */
@@ -88,7 +91,7 @@ export const packages: Package[] = [
     limits: { maxOutputTokens: 2_000, historyMessages: 20, concurrency: 2 },
     features: [
       "65M credits every month — no daily caps",
-      "ALL 24 chat models unlocked",
+      `ALL ${MODEL_COUNTS.chat} chat models unlocked`,
       `AI video generation — all ${MODEL_COUNTS.video} models`,
       `AI image generation — all ${MODEL_COUNTS.image} models`,
       `AI voice generation — all ${MODEL_COUNTS.audio} models`,
@@ -109,7 +112,7 @@ export const packages: Package[] = [
     limits: { maxOutputTokens: 4_000, historyMessages: 40, concurrency: 4 },
     features: [
       "280M credits every month — 4x Starter",
-      "ALL 24 chat models unlocked",
+      `ALL ${MODEL_COUNTS.chat} chat models unlocked`,
       `AI video generation — all ${MODEL_COUNTS.video} models`,
       `AI image generation — all ${MODEL_COUNTS.image} models`,
       `AI voice generation — all ${MODEL_COUNTS.audio} models`,
@@ -134,7 +137,7 @@ export const packages: Package[] = [
     limits: { maxOutputTokens: 8_000, historyMessages: 100, concurrency: 10 },
     features: [
       "975M credits every month — 15x Starter",
-      "ALL 24 chat models unlocked",
+      `ALL ${MODEL_COUNTS.chat} chat models unlocked`,
       `AI video generation — all ${MODEL_COUNTS.video} models`,
       `AI image generation — all ${MODEL_COUNTS.image} models`,
       `AI voice generation — all ${MODEL_COUNTS.audio} models`,
