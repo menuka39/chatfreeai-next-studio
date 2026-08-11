@@ -214,3 +214,33 @@
 		max-height: 46vh;
 	}
 }
+
+/* ---------------------------------------------------------------------------
+   Mobile: the studio must stack, not sit side by side
+
+   .avg-studio.avg-app is a flex ROW — rail on the left, content on the right.
+   Below 860px the rail is restyled to run horizontally, but the container was
+   never switched to a column, so the rail stayed a flex ITEM in that row. Six
+   buttons at min-width 64px claimed ~384px of a 390px screen and pushed the
+   whole control panel off the right edge: the prompt box, the spec bar and the
+   Render button were all clipped, and there was no horizontal scroll to reach
+   them. Turning the container into a column is the missing half of that
+   restyle.
+   --------------------------------------------------------------------------- */
+@media (max-width: 860px) {
+	.avg-studio.avg-app {
+		flex-direction: column;
+	}
+	/* the gutter between rail and content only makes sense side by side */
+	.avg-views {
+		padding-left: 0;
+	}
+	/* nothing inside may exceed the viewport once the row is gone */
+	.avg-studio.avg-app,
+	.avg-views,
+	.avg-genwrap,
+	.avg-panel {
+		max-width: 100%;
+		min-width: 0;
+	}
+}
