@@ -162,30 +162,52 @@ export interface Post {
   tag: string;
 }
 
+/**
+ * The blog index.
+ *
+ * These are the listing entries; the body of each post lives in the
+ * `blog_posts` table and is written through /admin/blog. This array is what
+ * the sitemap and the /blog page fall back to when the database is
+ * unreachable, so the slugs here and the slugs there have to match.
+ *
+ * The three topics are not chosen by taste. Each one answers a query cluster
+ * Search Console already shows the site ranking for on page 2-3 with almost no
+ * clicks — ranking that exists with no page behind it. Chasing a keyword the
+ * site has never ranked for would take a year; answering one it half-ranks for
+ * already is a much shorter road.
+ */
 export const posts: Post[] = [
   {
-    slug: "best-free-chatgpt-alternative-2026",
-    title: "The best free ChatGPT alternative in 2026, tested",
+    // "chatgpt free unlimited" and its variants: ~17,000 impressions at
+    // position 11-18, the largest winnable cluster in the whole report
+    slug: "unlimited-free-ai-chat",
+    title: 'Unlimited free AI chat: what "unlimited" actually means in 2026',
     excerpt:
-      "No account, no card, no cap — we compared the free multi-model chat tools worth your time this year.",
-    date: "2026-07-12",
-    readMins: 6,
+      "The word appears on almost every free AI chat page and means something different on each one. How to read the claim, the four limits hiding behind it, and which services are genuinely uncapped.",
+    date: "2026-08-09",
+    readMins: 8,
+    tag: "Guides",
+  },
+  {
+    // "chat gpt free online", "free chat gpt no login", "chat gpt login free":
+    // ~900 US impressions at position 18-33, nearly all with zero clicks
+    slug: "chatgpt-free-online-no-account",
+    title: "ChatGPT free online: how to use it without an account",
+    excerpt:
+      "You can use ChatGPT-class models in a browser tab with no sign-up and no card. What free actually gets you, where the limits sit, and how the no-account routes compare.",
+    date: "2026-08-08",
+    readMins: 7,
+    tag: "Guides",
+  },
+  {
+    // "ai chat free", "free ai chat", "chat ai free": high volume, position
+    // 47-67 — indexed and effectively invisible. This query wants a comparison.
+    slug: "best-free-ai-chat-2026",
+    title: "The best free AI chat tools in 2026, compared",
+    excerpt:
+      "Eight free AI chat services: what each is actually good at, where its free tier stops, and which to pick for coding, writing, research or long conversations.",
+    date: "2026-08-07",
+    readMins: 9,
     tag: "Comparisons",
-  },
-  {
-    slug: "chatgpt-vs-gemini-vs-deepseek",
-    title: "ChatGPT vs Gemini vs Deepseek: which one for which task",
-    excerpt: "A practical breakdown of where each model actually wins — writing, research, and code.",
-    date: "2026-06-28",
-    readMins: 5,
-    tag: "Guides",
-  },
-  {
-    slug: "ai-image-generator-no-signup",
-    title: "Generating AI images without signing up — what actually works",
-    excerpt: "A short field guide to free image generation, and what \"free\" quietly costs elsewhere.",
-    date: "2026-06-14",
-    readMins: 4,
-    tag: "Guides",
   },
 ];

@@ -134,6 +134,17 @@ const wordpressLeftovers = [
   { source: "/career-development", destination: "/", permanent: true },
   { source: "/active-recall", destination: "/", permanent: true },
 
+  /*
+   * Retired blog posts, pointed at whatever replaced their subject.
+   *
+   * Two of these were in the sitemap and had been crawled. Letting them 404
+   * would throw away whatever ranking they had built for the same reason as
+   * any other removed URL — and unlike the WordPress pages, these were ours.
+   */
+  { source: "/blog/best-free-chatgpt-alternative-2026", destination: "/blog/best-free-ai-chat-2026", permanent: true },
+  { source: "/blog/chatgpt-vs-gemini-vs-deepseek", destination: "/blog/best-free-ai-chat-2026", permanent: true },
+  { source: "/blog/ai-image-generator-no-signup", destination: "/tools/image-generator", permanent: true },
+
   /* ---- shapes an old WordPress install leaves behind ------------------- */
   { source: "/category/:slug*", destination: "/blog", permanent: true },
   { source: "/tag/:slug*", destination: "/blog", permanent: true },

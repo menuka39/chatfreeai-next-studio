@@ -177,6 +177,7 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
   const [lastFrameImg, setLastFrameImg] = useState("");
 
   const [modelsOpen, setModelsOpen] = useState(false);
+  const modelListRef = useRef<HTMLDivElement>(null);
   const [specsOpen, setSpecsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [progTxt, setProgTxt] = useState("Rendering…");
@@ -279,6 +280,22 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
     const id = setInterval(() => setElapsed(Date.now() - startedAt), 1000);
     return () => clearInterval(id);
   }, [busy, startedAt]);
+
+  /**
+   * Bring the model list into view when it opens.
+   *
+   * The control column is its own scroll container, so the list can unfold
+   * entirely below the visible area — the chevron turns, eight cards appear,
+   * and from where the user is sitting the button did nothing. Scrolling to it
+   * is the difference between "broken" and "there it is".
+   */
+  useEffect(() => {
+    if (!modelsOpen) return;
+    const id = requestAnimationFrame(() =>
+      modelListRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+    );
+    return () => cancelAnimationFrame(id);
+  }, [modelsOpen]);
 
   const goto = (v: View) => setView((cur) => (cur === v ? "generate" : v));
 
@@ -727,7 +744,11 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
                   <span className="avg-model-bar-chev">›</span>
                 </button>
 
-                <div className={`avg-models avg-models-collapsed${modelsOpen ? " avg-open" : ""}`} data-studio-open>
+                <div
+                  ref={modelListRef}
+                  className={`avg-models avg-models-collapsed${modelsOpen ? " avg-open" : ""}`}
+                  data-studio-open
+                >
                   {videoModels.map((m) => (
                     <button
                       key={m.id}
