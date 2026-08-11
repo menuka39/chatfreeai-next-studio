@@ -23,6 +23,20 @@
 		/* room so the last control isn't flush against the fade */
 		padding-bottom: 18px;
 	}
+
+	/*
+	 * Don't squash the controls to fit — scroll instead.
+	 *
+	 * .avg-controls is a flex column, and a flex item shrinks by default. The
+	 * moment the max-height above was added, opening the model dropdown made
+	 * every item compete for the same fixed height: the 360px list lost and
+	 * collapsed to a three-pixel strip, which looked exactly like a dropdown
+	 * that refuses to open. The height ceiling is meant to produce a
+	 * scrollbar, not to compress what is inside it.
+	 */
+	.avg-panel.avg-controls > * {
+		flex-shrink: 0;
+	}
 	.avg-panel.avg-controls::-webkit-scrollbar {
 		width: 8px;
 	}
