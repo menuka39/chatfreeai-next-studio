@@ -8,6 +8,7 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 
 const SITE_URL = process.env.SITE_URL ?? "https://chatfreeai.com";
+const GA_MEASUREMENT_ID = "G-PZCSS9P5TT";
 
 const geist = localFont({
   src: "./fonts/Geist-Variable.woff2",
@@ -110,7 +111,7 @@ export default function RootLayout({
   // fine with this unset. Skipped in local `next dev` on purpose: without
   // this, every page load while building/testing locally would report as
   // real traffic, quietly inflating the actual numbers an admin later reads.
-  const gaId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
+  const gaId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID ?? GA_MEASUREMENT_ID;
   const showAnalytics = Boolean(gaId) && process.env.NODE_ENV === "production";
   const showAds = adsenseConfigured && process.env.NODE_ENV === "production";
 
