@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
-import { GoogleAnalytics } from "@next/third-parties/google";
 import { AdSenseLoader } from "@/components/AdSense";
+import { GoogleAnalytics } from "@/components/GoogleAnalytics";
 import { adsenseConfigured } from "@/lib/adsense";
 import "./globals.css";
 import Header from "@/components/Header";
@@ -140,7 +140,7 @@ export default function RootLayout({
         <Header />
         <main className="flex-1">{children}</main>
         <Footer />
-        {showAnalytics && <GoogleAnalytics gaId={gaId!} />}
+        {showAnalytics && <GoogleAnalytics measurementId={gaId} />}
         {/* self-gates on "configured + production" internally, same as the GA condition above */}
         <AdSenseLoader />
       </body>
