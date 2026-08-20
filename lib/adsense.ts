@@ -31,5 +31,5 @@ export const adsenseConfigured =
  */
 export const AD_SLOTS = {
   /** Responsive banner above the chat box on the home page. */
-  chatTop: "0000000000",
+  chatTop: "3912546619",
 } as const;
