@@ -1,7 +1,7 @@
 "use client";
 
 import Script from "next/script";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import { ADSENSE_CLIENT_ID, adsenseConfigured } from "@/lib/adsense";
 
 /**
@@ -44,26 +44,47 @@ export function AdSenseLoader() {
  * One ad slot. Renders nothing at all until AdSense is actually configured —
  * so dropping <AdSlot> into a page now is safe: it's invisible today and
  * starts working the moment a real publisher id is set, with no code change.
+ *
+ * SCOPE OF THE PLACEMENT GUARANTEE: where <AdSlot> goes is under this repo's
+ * control; where Auto ads goes is not. Any page carrying an AdSense unit is
+ * eligible for Auto ads placement, so enabling it in the dashboard lets
+ * Google position units anywhere on the page — including inside the chat,
+ * which every placement decision here exists to prevent. Keep Auto ads off;
+ * see DEPLOY.md.
  */
 export function AdSlot({
   slot,
   format = "auto",
   className = "",
   minHeight = 280,
+  label = false,
 }: {
   /** the ad unit id from AdSense (its own value, separate from the publisher id) */
   slot: string;
   format?: string;
   className?: string;
   /**
-   * Space held for the ad before it fills, in pixels.
+   * Space held for the ad before it fills.
    *
    * An empty <ins> is zero-height until AdSense paints into it, and everything
    * below then jumps down — the single biggest source of layout shift on an
    * ad-supported page, and CLS is a ranking signal. Reserving the space costs
    * a gap for a moment; not reserving it costs the score.
+   *
+   * A single number reserves the same height everywhere, which is wrong for a
+   * responsive unit: AdSense serves a ~100px banner to a phone and a ~90px
+   * leaderboard to a desktop, so one number is guaranteed to over-reserve on
+   * one and under-reserve on the other. Pass `{ base, sm, lg }` to reserve
+   * per breakpoint — omitted steps inherit the one below.
    */
-  minHeight?: number;
+  minHeight?: number | { base: number; sm?: number; lg?: number };
+  /**
+   * Renders a small "Advertisement" caption above the unit. Worth it wherever
+   * an ad sits directly against real UI, so it doesn't read as part of the
+   * product. AdSense allows exactly "Advertisement" or "Sponsored Links" —
+   * anything more inviting ("useful links", "recommended") is a policy breach.
+   */
+  label?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const pushed = useRef(false);
@@ -109,11 +130,26 @@ export function AdSlot({
 
   if (!adsenseConfigured) return null;
 
+  // Inline styles can't hold media queries, so the breakpoints come from
+  // Tailwind utilities and the values ride in as custom properties.
+  const h = typeof minHeight === "number" ? { base: minHeight } : minHeight;
+  const vars = {
+    "--ad-h": `${h.base}px`,
+    "--ad-h-sm": `${h.sm ?? h.base}px`,
+    "--ad-h-lg": `${h.lg ?? h.sm ?? h.base}px`,
+  } as CSSProperties;
+  const reserve = "min-h-[var(--ad-h)] sm:min-h-[var(--ad-h-sm)] lg:min-h-[var(--ad-h-lg)]";
+
   return (
-    <div ref={ref} className={className} style={{ minHeight }}>
+    <div ref={ref} className={className} style={vars}>
+      {label && (
+        <p className="mb-1.5 text-center text-[11px] uppercase tracking-[0.14em] text-ink-faint">
+          Advertisement
+        </p>
+      )}
       <ins
-        className="adsbygoogle block"
-        style={{ display: "block", minHeight }}
+        className={`adsbygoogle block w-full ${reserve}`}
+        style={{ display: "block" }}
         data-ad-client={ADSENSE_CLIENT_ID}
         data-ad-slot={slot}
         data-ad-format={format}

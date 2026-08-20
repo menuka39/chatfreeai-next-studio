@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import { audioModelById, FORMATS, type AudioFormat } from "@/lib/audio-models";
 import { effectiveCost, creditsForUsd } from "@/lib/price-oracle";
-import { packageById } from "@/lib/packages";
 import { effectiveCredits, type LimitId } from "@/lib/plan-limits";
 import { charge, userMonthlyKey } from "@/lib/quota";
 import { uploadPublicAsset } from "@/lib/storage";

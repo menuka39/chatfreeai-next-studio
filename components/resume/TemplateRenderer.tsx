@@ -121,7 +121,7 @@ export default function TemplateRenderer({
 
   const contactBits = [r.email, r.phone, r.location].filter(Boolean);
 
-  const ExperienceBlock = ({ onDark = false }: { onDark?: boolean }) => (
+  const ExperienceBlock = () => (
     <div className={t.density === "compact" ? "mt-2 space-y-2.5" : "mt-2 space-y-3.5"}>
       {exp.map((e) => (
         <div key={e.id}>

@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import { imageModelById, imagePrice, imageSizeString } from "@/lib/image-models";
 import { effectiveCost, creditsForUsd } from "@/lib/price-oracle";
-import { packageById } from "@/lib/packages";
 import { effectiveCredits, type LimitId } from "@/lib/plan-limits";
 import { charge, userMonthlyKey } from "@/lib/quota";
 import { getSession, planFor } from "@/lib/session";

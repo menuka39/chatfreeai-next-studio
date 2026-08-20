@@ -1,11 +1,10 @@
 import { NextRequest } from "next/server";
 import { videoModelById, videoResolution } from "@/lib/video-models";
 import { effectiveCost, creditsForUsd } from "@/lib/price-oracle";
-import { signVideoUrl } from "@/lib/video-token";
+import { signVideoUrl, signRefundToken, verifyRefundToken } from "@/lib/video-token";
 import { uploadPublicAsset } from "@/lib/storage";
-import { packageById } from "@/lib/packages";
 import { effectiveCredits, type LimitId } from "@/lib/plan-limits";
-import { charge, userMonthlyKey } from "@/lib/quota";
+import { charge, claimOnce, userMonthlyKey } from "@/lib/quota";
 import { getSession, planFor } from "@/lib/session";
 import { openRouterKey } from "@/lib/openrouter";
 
@@ -232,8 +231,14 @@ export async function POST(req: NextRequest) {
     model: model.id,
     duration,
     resolution: resLabel,
-    // client sends this back when polling so a failed job can be refunded
-    refundToken: Buffer.from(JSON.stringify({ key, period: session.periodStart, credits })).toString("base64url"),
+    // Client sends this back when polling so a failed job can be refunded.
+    // Signed, and bound to this job and this user — see verifyRefundToken.
+    refundToken: signRefundToken({
+      jobId,
+      userId: session.userId!,
+      period: session.periodStart,
+      credits,
+    }),
   });
 }
 
@@ -310,6 +315,14 @@ export async function GET(req: NextRequest) {
   const jobId = req.nextUrl.searchParams.get("jobId");
   if (!jobId) return deny(400, "bad_request", "jobId is required.");
 
+  // Polling was open to anyone. Only a signed-in account can start a job, so
+  // only a signed-in account has any business asking about one — and the
+  // refund below has to know whose credits it is putting back.
+  const session = await getSession(req);
+  if (!session.userId) {
+    return deny(401, "auth_required", "Sign in to check on a video job.");
+  }
+
   const upstream = await fetch(`${OPENROUTER_VIDEOS}/${encodeURIComponent(jobId)}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
@@ -385,12 +398,18 @@ export async function GET(req: NextRequest) {
 
   if (failed) {
     const token = req.nextUrl.searchParams.get("refundToken");
-    if (token) {
-      try {
-        const { key, period, credits } = JSON.parse(Buffer.from(token, "base64url").toString());
-        await charge(key, period, Number.MAX_SAFE_INTEGER, -Math.abs(credits), MONTH_TTL);
-      } catch {
-        /* malformed token — nothing to refund */
+    const claim = token ? verifyRefundToken(token, jobId) : null;
+    // Three separate gates, because the old code had none of them:
+    //  - the signature proves WE issued this amount for THIS job;
+    //  - the owner check stops a valid token being replayed by someone else;
+    //  - the quota key is rebuilt from the session, so it can never name
+    //    another user's bucket.
+    if (claim && claim.userId === session.userId) {
+      // ...and the refund happens at most once, however many times the
+      // client polls a job that has already failed.
+      if (await claimOnce(`refunded:video:${jobId}`, MONTH_TTL)) {
+        const key = userMonthlyKey(session.userId, claim.period);
+        await charge(key, claim.period, Number.MAX_SAFE_INTEGER, -claim.credits, MONTH_TTL);
       }
     }
   }

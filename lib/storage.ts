@@ -1,4 +1,15 @@
 /**
+ * SERVER ONLY. Holds SUPABASE_SERVICE_ROLE_KEY.
+ *
+ * Importing this from a "use client" file is a build error, by design.
+ * Nothing leaks today — Next.js never inlines a non-NEXT_PUBLIC_ variable
+ * into the browser bundle; it substitutes `undefined`. That is the actual
+ * hazard: the mistake compiles, ships, and only shows up as an unexplained
+ * auth failure in production. This turns it into a red build instead.
+ */
+import "server-only";
+
+/**
  * Minimal Supabase Storage client for admin-uploaded assets — just enough to
  * upload a file to the public `public-assets` bucket (see supabase/schema.sql)
  * and get back its public URL. Service-role only; never called from a route

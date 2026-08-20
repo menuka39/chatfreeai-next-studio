@@ -33,7 +33,6 @@ export default async function AppleIcon() {
         }}
       >
         {logoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={logoUrl} width={140} height={140} style={{ objectFit: "contain", borderRadius: 24 }} alt="" />
         ) : (
           <span style={{ fontSize: 96, fontWeight: 700, color: "#0A0A0E", display: "flex" }}>

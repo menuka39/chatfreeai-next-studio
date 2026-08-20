@@ -2,6 +2,8 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import Chat from "@/components/Chat";
 import SignalConverge from "@/components/SignalConverge";
+import { AdSlot } from "@/components/AdSense";
+import { AD_SLOTS } from "@/lib/adsense";
 import { tools, posts } from "@/lib/data";
 import { baseModels, premiumModels } from "@/lib/models";
 
@@ -160,7 +162,39 @@ export default function Home() {
             </div>
           </div>
 
-          <div id="chat" className="mt-14 scroll-mt-24">
+          {/*
+            Ad sits ABOVE the chat, as its own block in the page — deliberately
+            not inside <Chat />.
+
+            Nothing goes in the chat interface itself: an ad among the message
+            bubbles or under the composer reads as part of the conversation,
+            which is both the worst thing for the product and an AdSense policy
+            problem (ads have to be distinguishable from content, and ads next
+            to a control the user is about to click invite accidental clicks —
+            that is what gets accounts disabled). Keeping it outside the chat
+            frame means it can never end up beside the send button, and it
+            never re-renders as messages stream.
+
+            Reserved height is per breakpoint because a responsive unit is not
+            one size: phones get roughly a 100px banner, tablets/desktop a
+            ~90px leaderboard. One fixed number would leave a visible gap on
+            one of them.
+
+            Invisible until AdSense approves the site and a real `ca-pub-…` id
+            is set — AdSlot returns null while unconfigured, so this changes
+            nothing on the live page today.
+          */}
+          <div className="mt-12">
+            <AdSlot
+              slot={AD_SLOTS.chatTop}
+              format="horizontal"
+              label
+              minHeight={{ base: 100, sm: 90 }}
+              className="mx-auto w-full max-w-4xl"
+            />
+          </div>
+
+          <div id="chat" className="mt-8 scroll-mt-24">
             <Chat />
           </div>
 

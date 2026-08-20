@@ -1,3 +1,14 @@
+/**
+ * SERVER ONLY. Holds PAYPAL_CLIENT_SECRET.
+ *
+ * Importing this from a "use client" file is a build error, by design.
+ * Nothing leaks today — Next.js never inlines a non-NEXT_PUBLIC_ variable
+ * into the browser bundle; it substitutes `undefined`. That is the actual
+ * hazard: the mistake compiles, ships, and only shows up as an unexplained
+ * auth failure in production. This turns it into a red build instead.
+ */
+import "server-only";
+
 
 /**
  * PayPal Subscriptions integration.

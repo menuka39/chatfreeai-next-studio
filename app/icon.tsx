@@ -38,7 +38,6 @@ export default async function Icon() {
         }}
       >
         {logoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={logoUrl} width={28} height={28} style={{ objectFit: "contain", borderRadius: 5 }} alt="" />
         ) : (
           <span style={{ fontSize: 20, fontWeight: 700, color: "#0A0A0E", display: "flex" }}>

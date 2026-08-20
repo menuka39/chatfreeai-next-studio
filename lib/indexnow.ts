@@ -1,4 +1,15 @@
 /**
+ * SERVER ONLY. Holds INDEXNOW_KEY.
+ *
+ * Importing this from a "use client" file is a build error, by design.
+ * Nothing leaks today — Next.js never inlines a non-NEXT_PUBLIC_ variable
+ * into the browser bundle; it substitutes `undefined`. That is the actual
+ * hazard: the mistake compiles, ships, and only shows up as an unexplained
+ * auth failure in production. This turns it into a red build instead.
+ */
+import "server-only";
+
+/**
  * IndexNow — tell Bing, Yandex, Naver and Seznam a URL changed.
  *
  * A sitemap says a page exists; it does not say it changed five seconds ago.

@@ -1683,17 +1683,103 @@ a post created with a cover image persists it to the database, and the
 public list thumbnail, the detail page's hero image, and the per-post
 `og:image` override all correctly reflect it.
 
+## Supabase custom domains — a validator that rejected the right answer
+
+`lib/supabase/url.ts` sanity-checks `NEXT_PUBLIC_SUPABASE_URL` against the
+anon key. It used to do this by pulling the project ref out of the hostname
+and refusing anything it couldn't parse:
+
+```ts
+const urlRef = projectRefFromUrl(url);
+if (!urlRef) return `NEXT_PUBLIC_SUPABASE_URL doesn't look like a Supabase project URL: ${url}`;
+```
+
+That is wrong for the one configuration most worth having. Google's consent
+screen shows the root domain of the OAuth callback URL, so stock Supabase Auth
+makes users read "to continue to `<20 random letters>.supabase.co`" while
+handing over a Google account. The supported fix is a Supabase **Custom
+Domain**, after which the URL is `https://auth.chatfreeai.com` — which carries
+no project ref at all, and so was reported as not looking like a Supabase URL.
+
+A second, quieter false positive was only found by writing the case table out:
+a **vanity subdomain** (`https://chatfreeai.supabase.co`) does still end in
+`.supabase.co`, so the old `([a-z0-9]+)` pattern happily matched and returned
+`"chatfreeai"` as the project ref. That never equals the real ref inside the
+key, so a correctly configured project was reported as a *project mismatch* —
+a more misleading error than the first, because it names two refs and invites
+you to go "fix" working config. Project refs are always 20 lowercase letters,
+so the pattern is now `([a-z]{20})`, which a vanity label won't match.
+
+The rule now: a null ref means "can't tell from the URL", not "bad URL". The
+checks that don't need the ref still run — that the value parses as an https
+URL, and that the key isn't a secret key pasted into the public slot — and the
+ref comparison is skipped when either side lacks one, exactly as it already
+was for `sb_publishable_…` keys.
+
+Verified against ten cases: default URL (with and without a trailing slash),
+custom domain, vanity subdomain, custom domain with a new-style key, a real
+project mismatch, a secret key in the public slot, a bare hostname with no
+scheme, and an empty value. The three genuine errors are still caught; the
+supported setups all pass.
+
+Worth noting this was latent — `supabaseConfigProblem` has no callers today.
+It was fixed anyway because the failure mode is a trap: it would have fired on
+the day the custom domain was switched on, blaming the config change that was
+actually correct.
+
+
 ## Google Analytics 4
 
-Added on request, using the real Measurement ID given (`G-PZCSS9P5TT`) —
-official `@next/third-parties/google` package, `<GoogleAnalytics>` in the
-root layout, which is the current recommended way to add GA4 to a Next.js
-App Router site (handles client-side route-change page views automatically,
-no manual `usePathname` wiring needed).
+Added on request, using the real Measurement ID given (`G-PZCSS9P5TT`).
+`<Analytics />` sits in the root layout, so it covers every route.
+
+**Correction to an earlier version of this section.** It previously said the
+`@next/third-parties/google` `<GoogleAnalytics>` component "handles
+client-side route-change page views automatically, no manual `usePathname`
+wiring needed". That was wrong, and wrong in a way worth spelling out,
+because the symptom is invisible from the code side.
+
+That component's entire body is `gtag('js')` plus `gtag('config', gaId)`.
+There is no router hook in it. It fires once, on first load. Every
+subsequent link click is a soft navigation — URL changes, no reload — and
+the component never hears about it.
+
+Per-page numbers still appeared for sites using it, but they were coming
+from GA4's **Enhanced Measurement > "page changes based on browser history
+events"**, a checkbox in the GA4 dashboard. So page-view tracking was
+resting on a setting outside the repo: switch it off and the reports quietly
+fall back to landing-page hits only, while the build stays perfectly clean.
+It also reads `document.title` at history-change time, which in the App
+Router is often still the *previous* page's title.
+
+`components/Analytics.tsx` now sends `page_view` from the router itself
+(`usePathname` + `useSearchParams`), with `send_page_view: false` in the
+gtag config so the automatic first-load hit doesn't double up — that flag is
+precisely what `@next/third-parties` gives no way to set, which is why it is
+hand-rolled with `next/script`, same as `components/AdSense.tsx`. Titles are
+read after two animation frames so the new route's metadata has landed.
+
+**Required GA4 dashboard change:** Admin → Data streams → the web stream →
+Enhanced measurement → turn **OFF** "Page changes based on browser history
+events". Leaving it on alongside this double-counts every soft navigation.
+Leave the rest of Enhanced Measurement (scrolls, outbound clicks, file
+downloads, site search) ON — those don't overlap with `page_view`.
+
+Sanity check after deploying: open GA4 → Reports → Realtime, click through
+three or four pages on the live site, and confirm the path count goes up by
+one per click, not two and not zero.
 
 Optional, matching every other integration in this app (`OPENROUTER_API_KEY`,
 `PAYPAL_*`, Turnstile, etc.) — the site works fine with
 `NEXT_PUBLIC_GA_MEASUREMENT_ID` unset, the script simply doesn't render.
+The id is validated against `G-…` shape, so a half-filled value is treated
+as unconfigured rather than loading a broken tag.
+
+`NEXT_PUBLIC_GA_MEASUREMENT_ID` must NOT be marked "Sensitive" in Vercel. It
+is inlined into the browser bundle at build time by definition — that is what
+`NEXT_PUBLIC_` means — so the flag protects nothing and Vercel flags the
+combination. Changing it also requires a redeploy **with the build cache
+cleared**, since the value is baked in at build time, not read at runtime.
 
 **Skipped in local `next dev` on purpose, even when the env var is set** —
 without this, every page load while building or testing locally would report
@@ -1754,11 +1840,75 @@ id + `next dev` → no script, but `/ads.txt` still served.
 
 **When approval comes through:** set `NEXT_PUBLIC_ADSENSE_CLIENT_ID` to the
 real id and rebuild (it's a `NEXT_PUBLIC_*` var — inlined at build time, so a
-restart alone won't pick it up). Then add `<AdSlot slot="…" />` wherever ads
-should appear, using ad-unit ids from the AdSense dashboard. Worth thinking
-about placement rather than reaching for Auto Ads on a chat product — ads
-injected into the chat interface itself would compete directly with the
-paid-tier upsell.
+restart alone won't pick it up), then replace the placeholder ids in
+`AD_SLOTS` (`lib/adsense.ts`) with the real `data-ad-slot` numbers from the
+AdSense dashboard. A wrong slot number doesn't error — the unit just never
+fills — so check AdSense Realtime afterwards rather than assuming.
+
+### Placement: above the chat, never inside it
+
+One unit is placed so far: a responsive banner directly above the chat box on
+the home page (`app/page.tsx`), between the hero and `<Chat />`.
+
+It sits in the page, **outside the `<Chat />` component**, and that is the
+whole point rather than an implementation detail:
+
+- An ad among message bubbles or under the composer reads as part of the
+  conversation. That is the worst possible outcome for a chat product and an
+  AdSense policy problem — units have to be distinguishable from content.
+- An ad next to a control the user is about to click harvests accidental
+  clicks. Invalid-traffic patterns are what get accounts disabled, and the
+  send button is the most-clicked element on the site.
+- Keeping it outside the chat frame also means it never re-renders while
+  messages stream.
+- On a chat product, ads inside the interface would compete directly with the
+  paid-tier upsell.
+
+### Auto ads must stay OFF — the code cannot enforce this
+
+Worth being exact about the limit of the guarantee above, because it is easy
+to read it as stronger than it is.
+
+In the code, ads inside the chat are impossible: `components/Chat.tsx`
+contains no ad markup of any kind, and the single `<AdSlot>` in the project is
+a sibling of `<Chat />` in `app/page.tsx`, not a descendant. Nothing in this
+repo can put an ad among the messages or beside the send button.
+
+That guarantee ends at the repo boundary. Since October 2019, Auto ads no
+longer requires its own snippet — any page carrying an AdSense unit is
+eligible, and the placement model then chooses positions on its own, the chat
+interface included. So a toggle in the AdSense dashboard can override the
+placement decision made here, with no code change and nothing to see in a diff.
+
+This is the same shape of problem as the GA Enhanced Measurement setting
+described above: behaviour that looks like it lives in the code actually
+depends on a dashboard checkbox outside it. Both are recorded in `DEPLOY.md`
+for that reason.
+
+The stakes are higher here than "an ad in an awkward spot". An ad rendered
+next to the send button collects accidental clicks, and invalid-click patterns
+are the usual reason AdSense accounts get disabled.
+
+**Do not hide auto-placed ads with CSS.** Hiding a served ad still counts the
+impression while nobody can see it — a policy violation on its own. If Auto
+ads must be enabled, use *Ad settings → Excluded areas* to exclude the chat
+region, and recheck it whenever the home page layout changes; the durable
+answer is leaving Auto ads off and using manual units only.
+
+`<AdSlot>` reserves space per breakpoint (`minHeight={{ base, sm, lg }}`)
+because a responsive unit is not one size — roughly a 100px banner on phones,
+a ~90px leaderboard from `sm` up. A single fixed number would over-reserve on
+one and under-reserve on the other, and an unreserved unit shifts the whole
+page down when it fills, which is a Core Web Vitals (CLS) hit. `label` adds an
+"Advertisement" caption — AdSense permits exactly that word or "Sponsored
+Links", nothing more inviting.
+
+Verified in the built output, both states: with no publisher id the home page
+contains zero `adsbygoogle` markup (the slot returns null, so adding it changed
+nothing on the live site today); with a realistic id the `<ins>` renders with
+the right client/slot/format, the custom properties come through as
+`--ad-h:100px; --ad-h-sm:90px`, and Tailwind emits all three `min-h-[var(…)]`
+utilities including inside the `sm:` and `lg:` media queries.
 
 ## Resume builder — PDF export rewritten, plus a pass over the tool
 

@@ -1,3 +1,14 @@
+/**
+ * SERVER ONLY. Reaches SUPABASE_SERVICE_ROLE_KEY through serviceQuery().
+ *
+ * Importing this from a "use client" file is a build error, by design.
+ * Nothing leaks today — Next.js never inlines a non-NEXT_PUBLIC_ variable
+ * into the browser bundle; it substitutes `undefined`. That is the actual
+ * hazard: the mistake compiles, ships, and only shows up as an unexplained
+ * auth failure in production. This turns it into a red build instead.
+ */
+import "server-only";
+
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import type { NextRequest } from "next/server";

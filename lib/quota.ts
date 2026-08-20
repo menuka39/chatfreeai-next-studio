@@ -1,4 +1,15 @@
 /**
+ * SERVER ONLY. Holds UPSTASH_REDIS_REST_TOKEN.
+ *
+ * Importing this from a "use client" file is a build error, by design.
+ * Nothing leaks today — Next.js never inlines a non-NEXT_PUBLIC_ variable
+ * into the browser bundle; it substitutes `undefined`. That is the actual
+ * hazard: the mistake compiles, ships, and only shows up as an unexplained
+ * auth failure in production. This turns it into a red build instead.
+ */
+import "server-only";
+
+/**
  * Server-side quota enforcement.
  *
  * Rules:
@@ -40,6 +51,11 @@ interface QuotaStore {
   incrBy(key: string, amount: number, ttlSeconds: number): Promise<number>;
   /** Current total, or 0. */
   read(key: string): Promise<number>;
+  /**
+   * Set `key` only if it does not already exist. True means this caller won
+   * the race and is the one allowed to act — used to make refunds one-shot.
+   */
+  setIfAbsent(key: string, ttlSeconds: number): Promise<boolean>;
   readonly kind: "memory" | "redis";
 }
 
@@ -67,6 +83,11 @@ class MemoryQuotaStore implements QuotaStore {
       expires: hit?.expires ?? Date.now() + ttlSeconds * 1000,
     });
     return total;
+  }
+  async setIfAbsent(key: string, ttlSeconds: number) {
+    if (this.live(key)) return false;
+    this.map.set(key, { total: 1, expires: Date.now() + ttlSeconds * 1000 });
+    return true;
   }
 }
 
@@ -159,6 +180,16 @@ class RedisQuotaStore implements QuotaStore {
     if (total === amount) await this.cmd(["EXPIRE", key, ttlSeconds]);
     return total;
   }
+
+  async setIfAbsent(key: string, ttlSeconds: number) {
+    // SET NX EX is atomic, so two concurrent polls of the same failed job
+    // cannot both come back true.
+    const res = await this.cmd<string>(["SET", key, "1", "NX", "EX", ttlSeconds]);
+    // null covers both "the key already existed" and "Redis is unreachable".
+    // Both mean: do not act. Failing closed here costs at most one missed
+    // refund; failing open costs unmetered credits.
+    return res === "OK";
+  }
 }
 
 function createStore(): QuotaStore {
@@ -241,6 +272,14 @@ export async function charge(
 ) {
   if (credits <= 0) {
     const total = await store.incrBy(key, credits, ttl);
+    // A counter must never go below zero. It shouldn't be possible now that
+    // refunds are signed and one-shot, but a negative total would silently
+    // become free usage on top of the next period's allowance, so put back
+    // whatever overshot rather than trusting that.
+    if (total < 0) {
+      await store.incrBy(key, -total, ttl);
+      return { ok: true as const, used: 0, remaining: Math.max(0, limit) };
+    }
     return { ok: true as const, used: total, remaining: Math.max(0, limit - total) };
   }
 
@@ -265,6 +304,22 @@ export async function charge(
       storeDown: true as const,
       reason: err instanceof Error ? err.message : "unknown",
     };
+  }
+}
+
+/**
+ * Take a one-shot claim on `key`. The first caller gets true; everyone after
+ * gets false until the key expires.
+ *
+ * Exists so an action that must happen at most once — refunding a failed
+ * video job, say — stays once even when the client controls how many times
+ * it asks. "The client stops after a terminal state" is not enforcement.
+ */
+export async function claimOnce(key: string, ttl = DAY_TTL): Promise<boolean> {
+  try {
+    return await store.setIfAbsent(key, ttl);
+  } catch {
+    return false;
   }
 }
 

@@ -1,14 +1,14 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
+import { Analytics } from "@/components/Analytics";
+import { analyticsEnabled } from "@/lib/analytics";
 import { AdSenseLoader } from "@/components/AdSense";
-import { GoogleAnalytics } from "@/components/GoogleAnalytics";
 import { adsenseConfigured } from "@/lib/adsense";
 import "./globals.css";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 
 const SITE_URL = process.env.SITE_URL ?? "https://chatfreeai.com";
-const GA_MEASUREMENT_ID = "G-PZCSS9P5TT";
 
 const geist = localFont({
   src: "./fonts/Geist-Variable.woff2",
@@ -107,12 +107,9 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Optional, like every other integration in this app — the site works
-  // fine with this unset. Skipped in local `next dev` on purpose: without
-  // this, every page load while building/testing locally would report as
-  // real traffic, quietly inflating the actual numbers an admin later reads.
-  const gaId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID ?? GA_MEASUREMENT_ID;
-  const showAnalytics = Boolean(gaId) && process.env.NODE_ENV === "production";
+  // Both integrations self-gate on "configured + production" — see
+  // lib/analytics.ts and lib/adsense.ts. Only the preconnect hints below
+  // need the flag out here.
   const showAds = adsenseConfigured && process.env.NODE_ENV === "production";
 
   return (
@@ -134,33 +131,14 @@ export default function RootLayout({
             <link rel="dns-prefetch" href="https://googleads.g.doubleclick.net" />
           </>
         )}
-        {showAnalytics && <link rel="preconnect" href="https://www.googletagmanager.com" />}
-        {showAnalytics && (
-          <>
-            <script
-              async
-              src={`https://www.googletagmanager.com/gtag/js?id=${gaId}`}
-            />
-            <script
-              dangerouslySetInnerHTML={{
-                __html: `
-                  window.dataLayer = window.dataLayer || [];
-                  function gtag(){dataLayer.push(arguments);}
-                  window.gtag = gtag;
-                  gtag('js', new Date());
-                  gtag('config', '${gaId}');
-                `,
-              }}
-            />
-          </>
-        )}
+        {analyticsEnabled && <link rel="preconnect" href="https://www.googletagmanager.com" />}
       </head>
       <body className="min-h-full flex flex-col bg-canvas text-ink">
         <Header />
         <main className="flex-1">{children}</main>
         <Footer />
-        {showAnalytics && <GoogleAnalytics measurementId={gaId} />}
-        {/* self-gates on "configured + production" internally, same as the GA condition above */}
+        {/* both self-gate on "configured + production" internally */}
+        <Analytics />
         <AdSenseLoader />
       </body>
     </html>

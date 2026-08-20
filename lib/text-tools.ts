@@ -578,6 +578,7 @@ export const textToolBySlug = (slug: string) => textTools.find((t) => t.slug ===
 export type TextToolClient = Omit<TextToolConfig, "build">;
 
 export function toClientTool(t: TextToolConfig): TextToolClient {
-  const { build: _build, ...rest } = t;
+  const { build, ...rest } = t;
+  void build; // server-only builder, deliberately not sent to the client
   return rest;
 }

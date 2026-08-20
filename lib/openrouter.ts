@@ -1,4 +1,15 @@
 /**
+ * SERVER ONLY. Holds OPENROUTER_API_KEY.
+ *
+ * Importing this from a "use client" file is a build error, by design.
+ * Nothing leaks today — Next.js never inlines a non-NEXT_PUBLIC_ variable
+ * into the browser bundle; it substitutes `undefined`. That is the actual
+ * hazard: the mistake compiles, ships, and only shows up as an unexplained
+ * auth failure in production. This turns it into a red build instead.
+ */
+import "server-only";
+
+/**
  * The OpenRouter credential, read in one place.
  *
  * Trimming matters more than it looks. Pasting a key into a hosting dashboard

@@ -106,14 +106,14 @@ site breaks without them:
 
 | Variable | Notes |
 |---|---|
-| `VIDEO_URL_SECRET` | any long random string. Signs provider video URLs so the frame-extraction proxy can't be pointed elsewhere (SSRF). Falls back to `OPENROUTER_API_KEY` if unset — set a dedicated value |
-| `NEXT_PUBLIC_GA_MEASUREMENT_ID` | `G-…` from analytics.google.com. Skipped automatically in local dev |
+| `VIDEO_URL_SECRET` | any long random string. Signs provider video URLs so the frame-extraction proxy can't be pointed elsewhere (SSRF), **and signs video refund tokens so credits can't be minted by editing one**. Falls back to `OPENROUTER_API_KEY` if unset — set a dedicated value. Rotating it invalidates refund tokens for jobs already in flight |
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID` | `G-…` from analytics.google.com. Skipped automatically in local dev. Do **not** mark it Sensitive in Vercel — `NEXT_PUBLIC_` is inlined into the browser bundle by design, so the flag protects nothing. Changing it needs a redeploy with the build cache cleared. Also turn **off** GA4 Enhanced Measurement's "page changes based on browser history events" — the app sends `page_view` itself, and both together double-count |
 
 **Optional**
 
 | Variable | Notes |
 |---|---|
-| `NEXT_PUBLIC_ADSENSE_CLIENT_ID` | `ca-pub-…`, only after AdSense approves the site. A placeholder containing `XXXX` is treated as unconfigured |
+| `NEXT_PUBLIC_ADSENSE_CLIENT_ID` | `ca-pub-…`, only after AdSense approves the site. A placeholder containing `XXXX` is treated as unconfigured. **On the day you set this, turn Auto ads OFF in AdSense** — see the warning below |
 | `PAYPAL_PLAN_STARTER`, `PAYPAL_PLAN_PRO`, `PAYPAL_PLAN_PROMAX` | pin specific PayPal plan ids. Leave unset and the app creates/finds them itself, which is what you want — it keys them by price so an admin price change correctly creates a new plan |
 | `LOG_MARGIN` | set to `1` to log real per-request cost vs charge. Useful for a week after launch, noisy after |
 | `OPENROUTER_BASE_URL`, `PAYPAL_BASE_URL`, `TURNSTILE_VERIFY_URL` | test-only overrides. **Leave unset in production** |
@@ -125,6 +125,79 @@ first deploy rather than assuming silence means success.
 
 After setting these, **redeploy** — `NEXT_PUBLIC_*` values are baked into the
 build, so a restart alone won't pick up a change.
+
+### Optional: a custom domain for the Google sign-in screen
+
+The Google account chooser shows the root domain of the OAuth **callback**
+URL. With stock Supabase Auth that is the project domain, so users see
+"to continue to <20-random-letters>.supabase.co" while handing over a Google
+account. Nothing is leaking — the project ref is public by design, it sits in
+`NEXT_PUBLIC_SUPABASE_URL` — but it reads like a phishing page and costs
+sign-ups.
+
+The fix is Supabase's **Custom Domain** add-on (paid plan + add-on), which
+moves Auth to e.g. `auth.chatfreeai.com`. Subdomains only; root domains are
+not supported. A **vanity subdomain** (`chatfreeai.supabase.co`) is the
+cheaper half-measure — still `.supabase.co`, but readable.
+
+Order matters on the day you switch:
+
+1. CNAME `auth.chatfreeai.com` -> `<project-ref>.supabase.co.` (trailing dot),
+   then `supabase domains create`, add the returned `_acme-challenge` TXT
+   record, then `supabase domains reverify`. Certificate issuance can take
+   ~30 minutes.
+2. **Before activating**, add the new callback URL to the Google OAuth client
+   in Google Cloud Console — *in addition to* the existing one, not replacing
+   it:
+   - `https://<project-ref>.supabase.co/auth/v1/callback` **and**
+   - `https://auth.chatfreeai.com/auth/v1/callback`
+
+   Auth switches to the custom domain the moment it activates. If Google
+   doesn't already recognise the new callback, every sign-in breaks at that
+   instant.
+3. `supabase domains activate`, then set `NEXT_PUBLIC_SUPABASE_URL` to
+   `https://auth.chatfreeai.com` and redeploy **with the build cache cleared**
+   (`NEXT_PUBLIC_*` is inlined at build time).
+
+The old project URL keeps working afterwards, so stored Storage URLs and any
+client still on the old value are fine — there's no rush and no migration.
+
+No code change is needed: nothing in the app hardcodes a `supabase.co`
+hostname, every caller goes through `normalizeSupabaseUrl`, and
+`lib/supabase/url.ts` accepts custom domains and vanity subdomains (see the
+README note on why it previously didn't).
+
+### ⚠️ The day AdSense is approved: turn Auto ads OFF
+
+**Do this in the same sitting as setting `NEXT_PUBLIC_ADSENSE_CLIENT_ID`.**
+AdSense → Ads → By site → edit the site → **Auto ads: Off**.
+
+The code places exactly one ad unit, deliberately positioned *above* the chat
+box and outside the `<Chat />` component, so nothing can land among the
+messages or beside the send button. That guarantee holds for the code and
+only the code.
+
+Since October 2019 Auto ads no longer needs its own snippet: any page carrying
+an AdSense unit is eligible, and Google's model then picks placements on its
+own — including inside the chat interface. Flipping Auto ads on silently
+overrides the placement decision made here, from a dashboard nobody reviews
+when shipping code.
+
+Why this matters more than it sounds: an ad rendered next to the send button
+harvests accidental clicks, and invalid-click patterns are the usual reason
+AdSense accounts get disabled. An ad among the message bubbles also reads as
+part of the conversation, which is separately a policy problem — units must be
+distinguishable from content.
+
+If Auto ads must be on, exclude the chat area under *Ad settings → Excluded
+areas* instead — but that is a region picked in a visual preview, so it needs
+rechecking every time the home page layout changes. Leaving Auto ads off is
+the durable answer.
+
+**Never hide an auto-placed ad with CSS** (`display: none` on
+`.google-auto-placed` or similar). The ad is still served and the impression
+still counts while no one can see it, which is a policy violation in its own
+right. Turn the placement off at the source instead.
 
 ### 3. Confirm the estimated prices, once
 

@@ -16,7 +16,7 @@ import {
 } from "@/lib/turnstile";
 import { createHash } from "crypto";
 import { livePrices } from "@/lib/price-oracle";
-import { packageById, restrictionsFor, FREE_LIMITS } from "@/lib/packages";
+import { restrictionsFor, FREE_LIMITS } from "@/lib/packages";
 import { effectiveCredits, type LimitId } from "@/lib/plan-limits";
 import {
   takePace,

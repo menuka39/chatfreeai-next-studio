@@ -19,3 +19,17 @@ export const ADSENSE_CLIENT_ID = process.env.NEXT_PUBLIC_ADSENSE_CLIENT_ID ?? ""
 /** A placeholder id is scaffolding, not a live integration — treat it as unconfigured. */
 export const adsenseConfigured =
   ADSENSE_CLIENT_ID.startsWith("ca-pub-") && !ADSENSE_CLIENT_ID.includes("XXXX");
+
+/**
+ * Ad unit ids, in one place rather than as loose strings in page files.
+ *
+ * These are placeholders until the units exist. After AdSense approves the
+ * site: create each unit in the AdSense dashboard, then paste its `data-ad-slot`
+ * number here. A wrong or placeholder number doesn't error — the unit just
+ * silently never fills, which is exactly the kind of failure that goes
+ * unnoticed for weeks, so treat it as a real step and check Realtime after.
+ */
+export const AD_SLOTS = {
+  /** Responsive banner above the chat box on the home page. */
+  chatTop: "0000000000",
+} as const;
