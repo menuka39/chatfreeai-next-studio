@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import ImageStudio from "@/components/studio/ImageStudio";
+import { listGuess } from "@/lib/showcase";
 import { imageModels } from "@/lib/image-models";
 
 export const metadata: Metadata = {
@@ -10,7 +11,10 @@ export const metadata: Metadata = {
     "Generate images with GPT Image 1.5, Imagen 4, Seedream 4.5, FLUX.2 Pro and Nano Banana — included in every paid plan, charged from your monthly credits.",
 };
 
-export default function ImageGeneratorPage() {
+export default async function ImageGeneratorPage() {
+  // fetched server-side with the page, same as the video generator — the Guess
+  // tab should be filled on first paint rather than after a client round trip
+  const guess = await listGuess("image");
   return (
     <section className="px-6 py-14">
       <div className="mx-auto max-w-6xl">
@@ -38,7 +42,7 @@ export default function ImageGeneratorPage() {
         </div>
 
         <div className="mt-10">
-          <ImageStudio />
+          <ImageStudio guess={guess} />
         </div>
 
         <p className="mt-8 text-[13px] text-ink-faint">

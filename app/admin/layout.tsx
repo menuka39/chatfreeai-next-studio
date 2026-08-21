@@ -10,7 +10,7 @@ const NAV = [
   { href: "/admin", label: "Overview" },
   { href: "/admin/blog", label: "Blog posts" },
   { href: "/admin/limits", label: "Limits & pricing" },
-  { href: "/admin/showcase", label: "Showcase" },
+  { href: "/admin/showcase", label: "Video Showcase" },
   { href: "/admin/settings", label: "Site settings" },
 ];
 

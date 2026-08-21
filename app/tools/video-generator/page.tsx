@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import VideoStudio from "@/components/studio/VideoStudio";
-import { listShowcase } from "@/lib/showcase";
+import { listShowcase, listGuess } from "@/lib/showcase";
 import { videoModels } from "@/lib/video-models";
 
 export const metadata: Metadata = {
@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 export default async function VideoGeneratorPage() {
   // fetched here so the gallery is server-rendered with the page — it is the
   // first thing a cold visitor sees, and should not wait on a client fetch
-  const showcase = await listShowcase();
+  const [showcase, guess] = await Promise.all([listShowcase("video"), listGuess("video")]);
   return (
     <section className="px-6 py-14">
       <div className="mx-auto max-w-6xl">
@@ -42,7 +42,7 @@ export default async function VideoGeneratorPage() {
         </div>
 
         <div className="mt-10">
-          <VideoStudio showcase={showcase} />
+          <VideoStudio showcase={showcase} guess={guess} />
         </div>
 
         <p className="mt-8 text-[13px] text-ink-faint">

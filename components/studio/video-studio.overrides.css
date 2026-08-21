@@ -258,3 +258,40 @@
 		min-width: 0;
 	}
 }
+
+/* ---------------------------------------------------------------------------
+   Guess + gallery thumbs
+
+   `.avg-guess-thumb` was `background:#000` with an empty <span> inside it, so
+   the Guess tab rendered as a grid of black rectangles with captions under
+   them. Real clips go in there now; these rules cover the two remaining ways
+   a card can still come up blank.
+   --------------------------------------------------------------------------- */
+
+/* Fallback cards (no clip ticked "Guess") get a surface instead of pure black,
+   so they read as a prompt tile rather than a broken image. */
+.avg-guess-thumb-empty {
+	background: linear-gradient(135deg, #1c1c24, #121218);
+}
+
+/* A video that hasn't painted a frame yet is transparent, not black — without
+   a backdrop the card looks like a hole in the page. */
+.avg-guess-thumb {
+	background: linear-gradient(135deg, #1c1c24, #121218);
+}
+.avg-guess-thumb video {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+}
+
+/* Prompts are full sentences now that cards carry the prompt rather than a
+   short generated title. Two lines, so a row ends level. */
+.avg-guess-title {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}

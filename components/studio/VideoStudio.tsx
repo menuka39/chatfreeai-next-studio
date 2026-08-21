@@ -166,7 +166,31 @@ const fileToDataUrl = (f: File) =>
     r.readAsDataURL(f);
   });
 
-export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip[] }) {
+/**
+ * Append a media fragment so the browser paints a frame.
+ *
+ * `preload="metadata"` fetches enough to know the duration, and desktop
+ * Chrome/Firefox go on to paint the first frame anyway. Mobile Safari and
+ * Android Chrome do not: with no `poster` they leave the element empty, which
+ * is why the "Get inspired" gallery looked like it wasn't rendering on phones
+ * while being perfectly fine on a desktop window narrowed to phone width —
+ * the difference is the browser, not the breakpoint, so it can't be found by
+ * resizing.
+ *
+ * `#t=0.1` asks for a seek to 0.1s, which forces a decode and paints that
+ * frame. A real poster is still better (it's one image instead of a video
+ * range request) — this is the floor, not the ceiling.
+ */
+const withFirstFrame = (url: string) => (url.includes("#") ? url : `${url}#t=0.1`);
+
+export default function VideoStudio({
+  showcase = [],
+  guess = [],
+}: {
+  showcase?: ShowcaseClip[];
+  /** Clips ticked "Guess" in the admin. Empty falls back to the built-in ideas. */
+  guess?: ShowcaseClip[];
+}) {
   const [view, setView] = useState<View>("generate");
   const [modelId, setModelId] = useState(videoModels[0].id);
   const [aspect, setAspect] = useState(videoModels[0].aspectRatios[0]);
@@ -1094,8 +1118,16 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
                               }}
                             >
                               <span className="avg-insp-thumb">
-                                <video muted loop playsInline preload="metadata" poster={g.posterUrl ?? undefined}>
-                                  <source src={g.videoUrl} type="video/mp4" />
+                                <video
+                                  muted
+                                  loop
+                                  playsInline
+                                  preload="metadata"
+                                  poster={g.posterUrl ?? undefined}
+                                  onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
+                                  onMouseLeave={(e) => e.currentTarget.pause()}
+                                >
+                                  <source src={withFirstFrame(g.videoUrl)} type="video/mp4" />
                                 </video>
                               </span>
                               <span className="avg-insp-title">{g.modelName ?? "Showcase"}</span>
@@ -1231,21 +1263,59 @@ export default function VideoStudio({ showcase = [] }: { showcase?: ShowcaseClip
             <h3 className="avg-h avg-view-h">Guess</h3>
             <p className="avg-view-sub">Tap a style to reuse its prompt.</p>
             <div className="avg-guessgrid">
-              {IDEAS.slice(0, 16).map((g) => (
-                <button
-                  key={g.prompt}
-                  type="button"
-                  className="avg-guess-card"
-                  onClick={() => {
-                    setPrompt(g.prompt);
-                    setView("generate");
-                    setTimeout(() => promptRef.current?.focus(), 200);
-                  }}
-                >
-                  <span className="avg-guess-thumb" />
-                  <span className="avg-guess-title">{g.title}</span>
-                </button>
-              ))}
+              {/*
+                The thumb used to be an empty <span>. The stylesheet already had
+                a `.avg-guess-thumb video` rule waiting for it, but nothing ever
+                rendered a video, so every card was the bare `background:#000` —
+                a grid of black rectangles with a caption under each.
+
+                Clips ticked "Guess" in the admin fill it now; the built-in text
+                prompts remain the fallback when none are ticked, so the tab is
+                never empty.
+              */}
+              {guess.length
+                ? guess.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      className="avg-guess-card"
+                      onClick={() => {
+                        setPrompt(g.prompt);
+                        setView("generate");
+                        setTimeout(() => promptRef.current?.focus(), 200);
+                      }}
+                    >
+                      <span className="avg-guess-thumb">
+                        <video
+                          muted
+                          loop
+                          playsInline
+                          preload="metadata"
+                          poster={g.posterUrl ?? undefined}
+                          onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
+                          onMouseLeave={(e) => e.currentTarget.pause()}
+                        >
+                          <source src={withFirstFrame(g.videoUrl)} type="video/mp4" />
+                        </video>
+                      </span>
+                      <span className="avg-guess-title">{g.prompt}</span>
+                    </button>
+                  ))
+                : IDEAS.slice(0, 16).map((g) => (
+                    <button
+                      key={g.prompt}
+                      type="button"
+                      className="avg-guess-card"
+                      onClick={() => {
+                        setPrompt(g.prompt);
+                        setView("generate");
+                        setTimeout(() => promptRef.current?.focus(), 200);
+                      }}
+                    >
+                      <span className="avg-guess-thumb avg-guess-thumb-empty" />
+                      <span className="avg-guess-title">{g.title}</span>
+                    </button>
+                  ))}
             </div>
           </div>
 

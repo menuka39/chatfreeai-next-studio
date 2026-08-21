@@ -275,3 +275,24 @@
 	line-height: 1.45;
 	color: var(--aig-muted, #9a9aa5);
 }
+
+/* ---------------------------------------------------------------------------
+   Guess thumbs
+   The grid previously showed only a gradient derived from the prompt text.
+   Real images go in there now, via background-image on the same span.
+   --------------------------------------------------------------------------- */
+.aig-guess-thumb {
+	background-color: #101014;
+	background-position: center;
+	background-size: cover;
+	background-repeat: no-repeat;
+}
+
+/* Cards carry the full prompt now, not a short title. */
+.aig-guess-title {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}

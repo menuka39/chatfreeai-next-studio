@@ -20,6 +20,7 @@ import { imageModels, imagePrice, dimensionsFor, type ImageModelConfig } from "@
 import { imagePresets, imageIdeas } from "@/lib/image-presets";
 import { packages } from "@/lib/packages";
 import { allClips, type StudioClip } from "@/lib/studio-projects";
+import type { ShowcaseClip } from "@/lib/showcase";
 import { useStudioProjects, useStudioCredits, fmtCredits, greeting } from "./useStudio";
 import "./image-studio.css";
 import "./image-studio.overrides.css";
@@ -199,7 +200,12 @@ const fileToDataUrl = (f: File) =>
     r.readAsDataURL(f);
   });
 
-export default function ImageStudio() {
+export default function ImageStudio({
+  guess = [],
+}: {
+  /** Images ticked "Guess" in the admin. Empty falls back to the gradient ideas. */
+  guess?: ShowcaseClip[];
+}) {
   /* ---------------- state ---------------- */
   const [view, setView] = useState<View>("generate");
   const [modelId, setModelId] = useState(imageModels[0].id);
@@ -1706,17 +1712,39 @@ export default function ImageStudio() {
             <h2 className="aig-view-h">Guess</h2>
             <p className="aig-view-sub">Tap a style to reuse its prompt.</p>
             <div className="aig-guessgrid">
-              {IDEAS.slice(0, 16).map((g) => (
-                <button
-                  key={g.prompt}
-                  type="button"
-                  className="aig-guess-card"
-                  onClick={() => applyPrompt(g.prompt)}
-                >
-                  <span className="aig-guess-thumb" style={{ backgroundImage: ideaGradient(g.prompt) }} />
-                  <span className="aig-guess-title">{g.title}</span>
-                </button>
-              ))}
+              {/*
+                Same gap the video studio had: this grid only ever showed
+                `ideaGradient(...)` — a colour wash derived from the prompt
+                text, not a real example. Images ticked "Guess" in the admin
+                fill it now, and the gradient stays as the fallback so the tab
+                is never empty.
+              */}
+              {guess.length
+                ? guess.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      className="aig-guess-card"
+                      onClick={() => applyPrompt(g.prompt)}
+                    >
+                      <span
+                        className="aig-guess-thumb"
+                        style={{ backgroundImage: `url(${JSON.stringify(g.videoUrl)})` }}
+                      />
+                      <span className="aig-guess-title">{g.prompt}</span>
+                    </button>
+                  ))
+                : IDEAS.slice(0, 16).map((g) => (
+                    <button
+                      key={g.prompt}
+                      type="button"
+                      className="aig-guess-card"
+                      onClick={() => applyPrompt(g.prompt)}
+                    >
+                      <span className="aig-guess-thumb" style={{ backgroundImage: ideaGradient(g.prompt) }} />
+                      <span className="aig-guess-title">{g.title}</span>
+                    </button>
+                  ))}
             </div>
           </div>
 

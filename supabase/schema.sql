@@ -292,6 +292,32 @@ create table if not exists public.showcase_clips (
   published boolean not null default true,
   created_at timestamptz not null default now()
 );
+/*
+ * Added later, so these are ALTERs rather than columns above — an existing
+ * project must be able to run this file again without losing its rows.
+ *
+ * surface   which studio the item belongs to. The video generator and the
+ *           image generator each have their own gallery, and they must not
+ *           show each other's media.
+ * in_guess  also show it on that studio's "Guess" tab. One list with a tick
+ *           rather than a second table: the same clip is usually wanted in
+ *           both places, and two tables would mean uploading it twice.
+ *
+ * video_url holds the media URL for both surfaces — it predates images and is
+ * kept rather than renamed so existing rows and any external reference keep
+ * working. Read it as "media_url".
+ */
+alter table public.showcase_clips add column if not exists surface text not null default 'video';
+alter table public.showcase_clips add column if not exists in_guess boolean not null default false;
+
+do $$ begin
+  alter table public.showcase_clips
+    add constraint showcase_clips_surface_check check (surface in ('video','image'));
+exception when duplicate_object then null; end $$;
+
+create index if not exists showcase_clips_surface_idx
+  on public.showcase_clips (surface, published, sort_order);
+
 alter table public.showcase_clips enable row level security;
 
 drop policy if exists "public read published showcase" on public.showcase_clips;
