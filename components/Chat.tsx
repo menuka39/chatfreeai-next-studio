@@ -137,6 +137,27 @@ export default function Chat() {
     allowZip: features?.zipAttachments ?? false,
   });
 
+  /*
+   * The composer's footer line, derived rather than inlined so the loading
+   * case is explicit — see the note at the render site for why that matters.
+   */
+  const KEY_HINT = "Enter to send, Shift+Enter for a new line";
+  const allowance = (() => {
+    if (!features) return KEY_HINT;
+    const uncapped = features.unlimitedModels ?? [];
+    const daily = features.dailyCredits ?? 0;
+    // "Deepseek and Qwen are" but "Deepseek is" — the list length decides the
+    // verb. Today there are two, but the catalogue is editable, so a config
+    // that leaves one uncapped shouldn't produce "Deepseek are unlimited".
+    const uncappedPhrase = `${uncapped.join(" and ")} ${uncapped.length > 1 ? "are" : "is"} unlimited`;
+    if (uncapped.length && daily > 0) {
+      return `${uncappedPhrase} · ${daily.toLocaleString()} credits/day on the rest · ${KEY_HINT}`;
+    }
+    if (uncapped.length) return `${uncappedPhrase} · ${KEY_HINT}`;
+    if (daily > 0) return `Free: ${daily.toLocaleString()} credits/day · ${KEY_HINT}`;
+    return KEY_HINT;
+  })();
+
   useEffect(() => {
     fetch("/api/chat").then((r) => r.json()).then(setFeatures).catch(() => {});
     // Reading the browser's own state on mount — localStorage, the URL, the
@@ -1114,12 +1135,23 @@ export default function Chat() {
                      * credits a token, so the old line promised roughly four
                      * times what it delivered. Both figures come from the API
                      * so changing them in /admin/limits updates this text too.
+                     *
+                     * `features` is null until GET /api/chat returns, and the
+                     * old `?? 0` turned that gap into "Free: 0 credits/day" —
+                     * printed to every first-time visitor for as long as the
+                     * request took, on a page whose whole promise is free and
+                     * unlimited. The real figures are 17,000 a day plus two
+                     * uncapped models, so the one number shown was not just
+                     * unhelpful, it was the opposite of true.
+                     *
+                     * Nothing is claimed until the server has said what the
+                     * allowance is. `allowance` is null both while loading
+                     * and if the numbers come back empty (a broken limits
+                     * config), because "say nothing" beats "say zero" in both
+                     * cases — the keyboard hint alone still reads as a
+                     * finished line.
                      */
-                    (features?.unlimitedModels?.length
-                      ? `${features.unlimitedModels.join(" and ")} are unlimited · ` +
-                        `${(features?.dailyCredits ?? 0).toLocaleString()} credits/day on the rest · `
-                      : `Free: ${(features?.dailyCredits ?? 0).toLocaleString()} credits/day · `) +
-                    `Enter to send, Shift+Enter for a new line`}
+                    allowance}
             </p>
           </div>
         </div>
